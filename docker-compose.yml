@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: archdesk-postgres
+    environment:
+      POSTGRES_DB: archdesk
+      POSTGRES_USER: archdesk
+      POSTGRES_PASSWORD: archdesk
+    ports:
+      - "5432:5432"
+    volumes:
+      - archdesk-data:/var/lib/postgresql/data
+
+  backend:
+    build: .
+    container_name: archdesk-backend
+    depends_on:
+      - postgres
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/archdesk
+      SPRING_DATASOURCE_USERNAME: archdesk
+      SPRING_DATASOURCE_PASSWORD: archdesk
+      APP_ADMIN_EMAIL: admin@archdesk.local
+      APP_ADMIN_PASSWORD: admin123
+      APP_JWT_SECRET: replace-this-with-a-long-production-secret
+    ports:
+      - "8080:8080"
+    volumes:
+      - archdesk-uploads:/app/uploads
+
+volumes:
+  archdesk-data:
+  archdesk-uploads:

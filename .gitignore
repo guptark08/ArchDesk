@@ -1,0 +1,27 @@
+# Build output
+target/
+frontend/dist/
+
+# Dependencies
+frontend/node_modules/
+
+# Runtime uploads and logs
+uploads/
+*.log
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# IDE and OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Codex/local helper mounts
+.agents/
+.codex/

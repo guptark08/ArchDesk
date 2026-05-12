@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: archdesk
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/archdesk}
+    username: ${SPRING_DATASOURCE_USERNAME:archdesk}
+    password: ${SPRING_DATASOURCE_PASSWORD:archdesk}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 11MB
+
+server:
+  port: ${SERVER_PORT:8080}
+
+app:
+  upload:
+    dir: ${APP_UPLOAD_DIR:/app/uploads}
+  jwt:
+    secret: ${APP_JWT_SECRET:change-this-development-secret-change-this}
+    expiration-minutes: ${APP_JWT_EXPIRATION_MINUTES:720}
+  admin:
+    email: ${APP_ADMIN_EMAIL:admin@archdesk.local}
+    password: ${APP_ADMIN_PASSWORD:admin123}
