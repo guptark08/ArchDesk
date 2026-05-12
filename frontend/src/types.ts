@@ -26,6 +26,24 @@ export interface ClientDetail extends ClientSummary {
   meetingNotes: MeetingNote[];
 }
 
+export interface DashboardStats {
+  activeProjectsCount: number;
+  overdueProjectsCount: number;
+  completedThisMonthCount: number;
+  totalPendingAmountInr: number;
+  recentProjects: RecentProjectItem[];
+}
+
+export interface RecentProjectItem {
+  clientId: number;
+  projectId: number;
+  clientName: string;
+  projectName: string;
+  projectStatus: ProjectStatus;
+  paymentStatus: PaymentStatus;
+  updatedAt: string;
+}
+
 export interface Project {
   id: number;
   name: string;
@@ -39,6 +57,9 @@ export interface Project {
   updatedAt: string;
   ledger: Ledger;
   sketches: Sketch[];
+  startDate?: string;
+  expectedCompletion?: string;
+  actualCompletion?: string;
 }
 
 export interface Sketch {

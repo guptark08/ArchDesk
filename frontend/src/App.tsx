@@ -11,6 +11,7 @@ import {
   deletePayment,
   deleteProject,
   deleteSketch,
+  getDashboardStats,
   getClient,
   isLoggedIn,
   listClients,
@@ -23,7 +24,8 @@ import {
   uploadSketch,
 } from './lib/api';
 import { inr, label, today } from './lib/format';
-import type { ClientDetail, ClientSummary, PaymentMode, PaymentStage, Project, ProjectStatus, ProjectType, Sketch } from './types';
+import type { ClientDetail, ClientSummary, DashboardStats, PaymentMode, PaymentStage, Project, ProjectStatus, ProjectType, RecentProjectItem, Sketch } from './types';
+import type { ProjectPayload } from './lib/api';
 import './styles.css';
 
 const projectTypes: ProjectType[] = ['RESIDENTIAL', 'COMMERCIAL', 'RENOVATION'];
@@ -45,14 +47,14 @@ interface StoredWorkspaceState {
   paymentTab: PaymentTab;
 }
 
-const workspaceStorageKey = 'archdesk.workspace';
+const workspaceStorageKey = 'archdesk.workspace.v2';
 
 function defaultWorkspaceState(): StoredWorkspaceState {
   return {
     selectedClientId: null,
     selectedProjectId: null,
     query: '',
-    mode: 'new_client',
+    mode: 'project',
     workspaceTab: 'requirements',
     paymentTab: 'payments',
   };
@@ -67,7 +69,7 @@ function readWorkspaceState(): StoredWorkspaceState {
       selectedClientId: typeof parsed.selectedClientId === 'number' ? parsed.selectedClientId : null,
       selectedProjectId: typeof parsed.selectedProjectId === 'number' ? parsed.selectedProjectId : null,
       query: typeof parsed.query === 'string' ? parsed.query : '',
-      mode: parsed.mode === 'new_project' || parsed.mode === 'project' ? parsed.mode : 'new_client',
+      mode: parsed.mode === 'new_client' || parsed.mode === 'new_project' ? parsed.mode : 'project',
       workspaceTab: parsed.workspaceTab === 'meeting_notes' || parsed.workspaceTab === 'site_sketches' ? parsed.workspaceTab : 'requirements',
       paymentTab: parsed.paymentTab === 'history' ? parsed.paymentTab : 'payments',
     };
@@ -92,7 +94,6 @@ function clientDefaults() {
     addressLocality: '',
     defaultProjectType: 'RESIDENTIAL' as ProjectType,
     plotSize: '',
-    approximateBudget: 0,
     projectStatus: 'ACTIVE' as ProjectStatus,
     generalNotes: '',
   };
@@ -104,9 +105,11 @@ function projectDefaults(client?: ClientDetail) {
     projectType: client?.defaultProjectType ?? 'RESIDENTIAL' as ProjectType,
     status: client?.projectStatus ?? 'ACTIVE' as ProjectStatus,
     plotSize: client?.plotSize ?? '',
-    approximateBudget: client?.approximateBudget ?? 0,
     requirements: '',
     notes: '',
+    startDate: '',
+    expectedCompletion: '',
+    actualCompletion: '',
   };
 }
 
@@ -205,7 +208,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
       setDetail(null);
       setSelectedClientId(null);
       setSelectedProjectId(null);
-      setShowNewClient(true);
+      setShowNewClient(false);
       setShowNewProject(false);
       clearWorkspaceState();
       throw err;
@@ -276,7 +279,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setSelectedClientId(null);
     setSelectedProjectId(null);
     setQuery('');
-    setShowNewClient(true);
+    setShowNewClient(false);
     setShowNewProject(false);
     setProjectDraft(null);
     setWorkspaceTab('requirements');
@@ -290,7 +293,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setDetail(null);
     setSelectedClientId(null);
     setSelectedProjectId(null);
-    setShowNewClient(true);
+    setShowNewClient(false);
     setProjectDraft(null);
     await refresh(null, null);
   }
@@ -363,6 +366,16 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           }}
           onProjectUpdated={async () => refresh(detail?.id ?? null, selectedProjectId)}
           onProjectDeleted={async () => refresh(detail?.id ?? null, null)}
+          onNavigateToProject={async (clientId, projectId) => {
+            const fresh = await getClient(clientId);
+            setDetail(fresh);
+            setSelectedClientId(clientId);
+            setSelectedProjectId(projectId);
+            setShowNewClient(false);
+            setShowNewProject(false);
+            setWorkspaceTab('requirements');
+            setPaymentTab('payments');
+          }}
         />
         {selectedProject && !showNewProject && (
           <PaymentSidebar
@@ -465,6 +478,7 @@ function RequirementPane({
   onProjectSaved,
   onProjectUpdated,
   onProjectDeleted,
+  onNavigateToProject,
 }: {
   client: ClientDetail | null;
   project: Project | null;
@@ -479,11 +493,12 @@ function RequirementPane({
   onProjectSaved: (project: Project) => Promise<void>;
   onProjectUpdated: () => Promise<void>;
   onProjectDeleted: () => Promise<void>;
+  onNavigateToProject: (clientId: number, projectId: number) => Promise<void>;
 }) {
   return (
     <section className="requirement-pane">
       {showNewClient && <NewClientForm large onSaved={onClientSaved} />}
-      {!showNewClient && !client && <NewClientForm large onSaved={onClientSaved} />}
+      {!showNewClient && !client && <Dashboard onNavigate={onNavigateToProject} />}
       {client && showNewProject && projectDraft && (
         <NewProjectForm
           client={client}
@@ -528,7 +543,10 @@ function RequirementPane({
           </div>
           <div className="workspace-panel">
             {activeTab === 'requirements' && (
-              <ProjectRequirementForm clientId={client.id} project={project} onSaved={onProjectUpdated} onDeleted={onProjectDeleted} />
+              <>
+                <ProjectRequirementForm clientId={client.id} project={project} onSaved={onProjectUpdated} onDeleted={onProjectDeleted} />
+                <MilestoneTimeline project={project} />
+              </>
             )}
             {activeTab === 'meeting_notes' && <MeetingNotes client={client} refresh={onProjectUpdated} />}
             {activeTab === 'site_sketches' && <SketchGallery project={project} refresh={onProjectUpdated} />}
@@ -536,6 +554,100 @@ function RequirementPane({
         </>
       )}
     </section>
+  );
+}
+
+function Dashboard({ onNavigate }: { onNavigate: (clientId: number, projectId: number) => Promise<void> }) {
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    getDashboardStats()
+      .then((result) => {
+        if (!cancelled) setStats(result);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Unable to load dashboard');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (loading) {
+    return <section className="dashboard-overview"><h1>Overview</h1><p className="rail-empty">Loading...</p></section>;
+  }
+
+  if (error) {
+    return <section className="dashboard-overview"><h1>Overview</h1><p className="error">{error}</p></section>;
+  }
+
+  const dashboard = stats ?? {
+    activeProjectsCount: 0,
+    overdueProjectsCount: 0,
+    completedThisMonthCount: 0,
+    totalPendingAmountInr: 0,
+    recentProjects: [],
+  };
+
+  return (
+    <section className="dashboard-overview">
+      <h1>Overview</h1>
+      <div className="dashboard-stats">
+        <div><span>Active projects</span><strong>{dashboard.activeProjectsCount}</strong></div>
+        <div><span>Overdue payments</span><strong className={dashboard.overdueProjectsCount > 0 ? 'danger-value' : ''}>{dashboard.overdueProjectsCount}</strong></div>
+        <div><span>Pending amount</span><strong className={dashboard.totalPendingAmountInr > 0 ? 'warning-value' : ''}>{inr(dashboard.totalPendingAmountInr)}</strong></div>
+        <div><span>Completed this month</span><strong>{dashboard.completedThisMonthCount}</strong></div>
+      </div>
+      <div className="recent-projects">
+        <h2>Recently updated</h2>
+        {!dashboard.recentProjects.length && <div className="dashboard-empty">No projects yet. Add your first client to get started.</div>}
+        {dashboard.recentProjects.map((item) => (
+          <RecentProjectRow key={item.projectId} item={item} onNavigate={onNavigate} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function RecentProjectRow({
+  item,
+  onNavigate,
+}: {
+  item: RecentProjectItem;
+  onNavigate: (clientId: number, projectId: number) => Promise<void>;
+}) {
+  const [loading, setLoading] = useState(false);
+
+  return (
+    <button
+      type="button"
+      className="recent-project-row"
+      disabled={loading}
+      onClick={async () => {
+        setLoading(true);
+        try {
+          await onNavigate(item.clientId, item.projectId);
+        } finally {
+          setLoading(false);
+        }
+      }}
+    >
+      <div className="recent-project-title">
+        <strong>{item.clientName}</strong>
+        <span>{item.projectName}</span>
+      </div>
+      <Badge value={item.projectStatus} />
+      <Badge value={item.paymentStatus} />
+      <span>{timeAgo(item.updatedAt)}</span>
+    </button>
   );
 }
 
@@ -631,7 +743,7 @@ function NewClientForm({ onSaved, large = false }: { onSaved: (client: ClientDet
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const saved = await createClient({ ...form, approximateBudget: Number(form.approximateBudget || 0) });
+    const saved = await createClient(form);
     setForm(clientDefaults());
     await onSaved(saved);
   }
@@ -646,7 +758,6 @@ function NewClientForm({ onSaved, large = false }: { onSaved: (client: ClientDet
       <label>Type<select value={form.defaultProjectType} onChange={(event) => setForm({ ...form, defaultProjectType: event.target.value as ProjectType })}>{projectTypes.map((type) => <option key={type} value={type}>{label(type)}</option>)}</select></label>
       <label>Status<select value={form.projectStatus} onChange={(event) => setForm({ ...form, projectStatus: event.target.value as ProjectStatus })}>{projectStatuses.map((status) => <option key={status} value={status}>{label(status)}</option>)}</select></label>
       <label>Plot size<input value={form.plotSize} onChange={(event) => setForm({ ...form, plotSize: event.target.value })} /></label>
-      <label>Budget<input type="number" min="0" value={form.approximateBudget} onChange={(event) => setForm({ ...form, approximateBudget: Number(event.target.value) })} /></label>
       <label className="form-wide">Notes<textarea value={form.generalNotes} onChange={(event) => setForm({ ...form, generalNotes: event.target.value })} /></label>
       <button className="primary">Save client</button>
     </form>
@@ -668,8 +779,9 @@ function NewProjectForm({
 }) {
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const { clientId, ...payload } = value;
-    const saved = await createProject(client.id, { ...payload, approximateBudget: Number(payload.approximateBudget || 0) });
+    const { clientId, ...rest } = value;
+    const payload = projectPayload(rest);
+    const saved = await createProject(client.id, payload);
     await onSaved(saved);
   }
 
@@ -680,7 +792,8 @@ function NewProjectForm({
       <label>Type<select value={value.projectType} onChange={(event) => onChange({ ...value, projectType: event.target.value as ProjectType })}>{projectTypes.map((type) => <option key={type} value={type}>{label(type)}</option>)}</select></label>
       <label>Status<select value={value.status} onChange={(event) => onChange({ ...value, status: event.target.value as ProjectStatus })}>{projectStatuses.map((status) => <option key={status} value={status}>{label(status)}</option>)}</select></label>
       <label>Plot size<input value={value.plotSize} onChange={(event) => onChange({ ...value, plotSize: event.target.value })} /></label>
-      <label>Approx. budget<input type="number" min="0" value={value.approximateBudget} onChange={(event) => onChange({ ...value, approximateBudget: Number(event.target.value) })} /></label>
+      <strong className="form-wide">Milestone dates</strong>
+      <label>Expected completion<input type="date" value={value.expectedCompletion} onChange={(event) => onChange({ ...value, expectedCompletion: event.target.value })} /></label>
       <label className="form-wide">Requirement<textarea value={value.requirements} onChange={(event) => onChange({ ...value, requirements: event.target.value })} /></label>
       <label className="form-wide">Project notes<textarea value={value.notes} onChange={(event) => onChange({ ...value, notes: event.target.value })} /></label>
       <div className="form-actions">
@@ -689,6 +802,20 @@ function NewProjectForm({
       </div>
     </form>
   );
+}
+
+function projectPayload(project: ProjectPayload | ProjectDraft | Project): ProjectPayload {
+  return {
+    name: project.name,
+    projectType: project.projectType,
+    status: project.status,
+    plotSize: project.plotSize,
+    requirements: project.requirements,
+    notes: project.notes,
+    startDate: project.startDate || undefined,
+    expectedCompletion: project.expectedCompletion || undefined,
+    actualCompletion: project.actualCompletion || undefined,
+  };
 }
 
 function ProjectRequirementForm({
@@ -712,8 +839,18 @@ function ProjectRequirementForm({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    await updateProject(clientId, project.id, { ...form, approximateBudget: Number(form.approximateBudget || 0) });
+    await updateProject(clientId, project.id, projectPayload(form));
     await updateFee(project.id, Number(totalCosting || 0));
+    await onSaved();
+  }
+
+  async function markStarted() {
+    await updateProject(clientId, project.id, projectPayload({ ...form, startDate: today() }));
+    await onSaved();
+  }
+
+  async function markDelivered() {
+    await updateProject(clientId, project.id, projectPayload({ ...form, actualCompletion: today() }));
     await onSaved();
   }
 
@@ -723,7 +860,11 @@ function ProjectRequirementForm({
       <label>Type<select value={form.projectType} onChange={(event) => setForm({ ...form, projectType: event.target.value as ProjectType })}>{projectTypes.map((type) => <option key={type} value={type}>{label(type)}</option>)}</select></label>
       <label>Status<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as ProjectStatus })}>{projectStatuses.map((status) => <option key={status} value={status}>{label(status)}</option>)}</select></label>
       <label>Plot size<input value={form.plotSize ?? ''} onChange={(event) => setForm({ ...form, plotSize: event.target.value })} /></label>
-      <label>Approx. budget<input type="number" min="0" value={form.approximateBudget ?? 0} onChange={(event) => setForm({ ...form, approximateBudget: Number(event.target.value) })} /></label>
+      <label>Expected completion<input type="date" value={form.expectedCompletion ?? ''} onChange={(event) => setForm({ ...form, expectedCompletion: event.target.value })} /></label>
+      <div className="milestone-actions">
+        <button type="button" className="primary" disabled={Boolean(project.startDate)} onClick={markStarted}>Started</button>
+        <button type="button" className="primary" disabled={!project.startDate || Boolean(project.actualCompletion)} onClick={markDelivered}>Delivered</button>
+      </div>
       <label className="form-wide">Requirement<textarea value={form.requirements ?? ''} onChange={(event) => setForm({ ...form, requirements: event.target.value })} /></label>
       <label className="form-wide">Project notes<textarea value={form.notes ?? ''} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
       <label className="costing-field">Total costing after requirement<input type="number" min="0" value={totalCosting} onChange={(event) => setTotalCosting(Number(event.target.value))} /></label>
@@ -737,6 +878,44 @@ function ProjectRequirementForm({
         >Delete project</button>
       </div>
     </form>
+  );
+}
+
+function MilestoneTimeline({ project }: { project: Project }) {
+  if (!project.startDate && !project.expectedCompletion && !project.actualCompletion) {
+    return null;
+  }
+
+  const expectedOverdue = Boolean(
+    project.expectedCompletion
+    && new Date(project.expectedCompletion) < new Date()
+    && !project.actualCompletion
+    && project.status !== 'COMPLETED',
+  );
+  const plannedDuration = project.startDate && project.expectedCompletion ? daysBetween(project.startDate, project.expectedCompletion) : null;
+  const deliveredDuration = project.startDate && project.actualCompletion ? daysBetween(project.startDate, project.actualCompletion) : null;
+
+  return (
+    <section className="timeline-section">
+      <h2>Project timeline</h2>
+      <div className="timeline-row">
+        <span className="timeline-icon" />
+        <span>Start date</span>
+        <strong>{formatDate(project.startDate)}</strong>
+      </div>
+      <div className="timeline-row">
+        <span className="timeline-icon" />
+        <span>Expected completion</span>
+        <strong>{formatDate(project.expectedCompletion)} {expectedOverdue && <em>overdue</em>}</strong>
+      </div>
+      <div className="timeline-row">
+        <span className="timeline-icon" />
+        <span>Delivered</span>
+        <strong>{formatDate(project.actualCompletion)}</strong>
+      </div>
+      {plannedDuration !== null && <p className="timeline-meta">Planned duration: {plannedDuration} {plannedDuration === 1 ? 'day' : 'days'}</p>}
+      {deliveredDuration !== null && <p className="timeline-meta">Delivered in {deliveredDuration} {deliveredDuration === 1 ? 'day' : 'days'}</p>}
+    </section>
   );
 }
 
@@ -916,6 +1095,31 @@ function SketchGallery({ project, refresh }: { project: Project; refresh: () => 
 
 function formatSketchDate(value: string) {
   return new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(value));
+}
+
+function formatDate(iso?: string): string {
+  if (!iso) return '-';
+  return new Date(iso).toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function daysBetween(startIso: string, endIso: string): number {
+  const start = new Date(`${startIso}T00:00:00`);
+  const end = new Date(`${endIso}T00:00:00`);
+  return Math.max(0, Math.round((end.getTime() - start.getTime()) / 86400000));
+}
+
+function timeAgo(isoString: string): string {
+  const diffMs = Date.now() - new Date(isoString).getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 60) return diffMins <= 1 ? 'just now' : `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return diffDays === 1 ? 'yesterday' : `${diffDays} days ago`;
 }
 
 function Badge({ value }: { value: string }) {

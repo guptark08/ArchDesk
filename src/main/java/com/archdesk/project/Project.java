@@ -1,6 +1,7 @@
 package com.archdesk.project;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -56,6 +57,10 @@ public class Project {
 
     @Column(columnDefinition = "text")
     private String notes;
+
+    private LocalDate startDate;
+    private LocalDate expectedCompletion;
+    private LocalDate actualCompletion;
 
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
@@ -147,6 +152,30 @@ public class Project {
 
     public void setNotes(String notes) {
         this.notes = notes;
+    }
+
+    public LocalDate getStartDate() {
+        return startDate;
+    }
+
+    public void setStartDate(LocalDate startDate) {
+        this.startDate = startDate;
+    }
+
+    public LocalDate getExpectedCompletion() {
+        return expectedCompletion;
+    }
+
+    public void setExpectedCompletion(LocalDate expectedCompletion) {
+        this.expectedCompletion = expectedCompletion;
+    }
+
+    public LocalDate getActualCompletion() {
+        return actualCompletion;
+    }
+
+    public void setActualCompletion(LocalDate actualCompletion) {
+        this.actualCompletion = actualCompletion;
     }
 
     public Instant getCreatedAt() {

@@ -66,6 +66,24 @@ public final class ClientDtos {
             List<MeetingNoteResponse> meetingNotes) {
     }
 
+    public record DashboardStats(
+            long activeProjectsCount,
+            long overdueProjectsCount,
+            long completedThisMonthCount,
+            long totalPendingAmountInr,
+            List<RecentProjectItem> recentProjects) {
+    }
+
+    public record RecentProjectItem(
+            Long clientId,
+            Long projectId,
+            String clientName,
+            String projectName,
+            ProjectStatus projectStatus,
+            PaymentStatus paymentStatus,
+            Instant updatedAt) {
+    }
+
     public record ProjectRequest(
             @NotBlank String name,
             @NotNull ProjectType projectType,
@@ -73,7 +91,10 @@ public final class ClientDtos {
             String plotSize,
             @PositiveOrZero Long approximateBudget,
             String requirements,
-            String notes) {
+            String notes,
+            LocalDate startDate,
+            LocalDate expectedCompletion,
+            LocalDate actualCompletion) {
     }
 
     public record ProjectResponse(
@@ -88,7 +109,10 @@ public final class ClientDtos {
             Instant createdAt,
             Instant updatedAt,
             LedgerResponse ledger,
-            List<SketchResponse> sketches) {
+            List<SketchResponse> sketches,
+            LocalDate startDate,
+            LocalDate expectedCompletion,
+            LocalDate actualCompletion) {
     }
 
     public record SketchResponse(
@@ -193,7 +217,10 @@ public final class ClientDtos {
                 project.getCreatedAt(),
                 project.getUpdatedAt(),
                 ledger(project.getLedger()),
-                project.getSketches().stream().sorted(Comparator.comparing(ProjectSketch::getUploadedAt)).map(ClientDtos::sketch).toList());
+                project.getSketches().stream().sorted(Comparator.comparing(ProjectSketch::getUploadedAt)).map(ClientDtos::sketch).toList(),
+                project.getStartDate(),
+                project.getExpectedCompletion(),
+                project.getActualCompletion());
     }
 
     public static SketchResponse sketch(ProjectSketch sketch) {

@@ -1,4 +1,4 @@
-import type { ClientDetail, ClientSummary, Ledger, PaymentMode, PaymentStage, Project, ProjectStatus, ProjectType, Sketch } from '../types';
+import type { ClientDetail, ClientSummary, DashboardStats, Ledger, PaymentMode, PaymentStage, Project, ProjectStatus, ProjectType, Sketch } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
 
@@ -51,6 +51,10 @@ export function isLoggedIn() {
   return Boolean(token());
 }
 
+export function getDashboardStats() {
+  return request<DashboardStats>('/api/dashboard');
+}
+
 export interface ClientPayload {
   fullName: string;
   phoneNumber: string;
@@ -71,6 +75,9 @@ export interface ProjectPayload {
   approximateBudget?: number;
   requirements?: string;
   notes?: string;
+  startDate?: string;
+  expectedCompletion?: string;
+  actualCompletion?: string;
 }
 
 export function listClients(params: URLSearchParams) {

@@ -70,6 +70,9 @@ public class ProjectService {
         project.setApproximateBudget(request.approximateBudget());
         project.setRequirements(blankToNull(request.requirements()));
         project.setNotes(blankToNull(request.notes()));
+        project.setStartDate(request.startDate());
+        project.setExpectedCompletion(request.expectedCompletion());
+        project.setActualCompletion(request.actualCompletion());
     }
 
     private String blankToNull(String value) {

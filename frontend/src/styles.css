@@ -56,7 +56,7 @@ h1, h2, h3, p { margin: 0; }
 .client-picker strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .client-picker span { font-size: 12px; opacity: .9; }
 
-.mock-form, .requirement-form, .meeting-section, .sketch-section { display: grid; gap: 12px; background: #ffffff; border: 1px solid #dddddd; border-radius: 6px; padding: 14px; margin: 0; }
+.mock-form, .requirement-form, .meeting-section, .sketch-section, .timeline-section { display: grid; gap: 12px; background: #ffffff; border: 1px solid #dddddd; border-radius: 6px; padding: 14px; margin: 0; }
 .mock-form strong { font-size: 13px; color: #1f1f1f; }
 .large-form { width: 100%; min-height: calc(100vh - 120px); grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; background: #ffffff; }
 .large-form strong, .large-form .form-wide, .large-form button { grid-column: 1 / -1; color: #2f2b2b; }
@@ -67,8 +67,37 @@ h1, h2, h3, p { margin: 0; }
 .requirement-form label { color: #3e3a3a; }
 .form-wide { grid-column: 1 / -1; }
 .costing-field { grid-column: 1 / 2; }
+.milestone-actions { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
+.milestone-actions .primary { min-width: 104px; min-height: 36px; }
+.milestone-actions .primary:disabled { opacity: .55; cursor: not-allowed; }
 .form-actions { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
 .empty-workspace { color: #595454; font-size: 14px; padding: 16px 0; }
+
+.dashboard-overview { display: grid; gap: 16px; }
+.dashboard-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.dashboard-stats div { background: #ffffff; border: 1px solid #dddddd; border-radius: 6px; padding: 14px; display: grid; gap: 5px; }
+.dashboard-stats span { font-size: 11px; color: #666666; text-transform: uppercase; letter-spacing: .04em; }
+.dashboard-stats strong { font-size: 22px; color: #1f1f1f; }
+.danger-value { color: #9a554d !important; }
+.warning-value { color: #9c874c !important; }
+.recent-projects { display: grid; gap: 8px; }
+.recent-projects h2 { font-size: 14px; font-weight: 700; }
+.recent-project-row { width: 100%; border: 1px solid #dddddd; border-radius: 5px; background: #ffffff; color: #1f1f1f; padding: 10px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto 74px; gap: 10px; align-items: center; text-align: left; font-size: 12px; }
+.recent-project-row:hover { background: #f4f4f4; }
+.recent-project-row:disabled { opacity: .7; cursor: wait; }
+.recent-project-title { display: grid; gap: 2px; min-width: 0; }
+.recent-project-title strong, .recent-project-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-project-title span { color: #555555; }
+.dashboard-empty { min-height: 96px; display: grid; place-items: center; border: 1px dashed #9f9f9f; border-radius: 6px; color: #666666; font-size: 13px; background: #ffffff; }
+
+.timeline-section { margin: 0 0 18px; background: #f9f9f9; }
+.timeline-section h2 { font-size: 14px; font-weight: 700; }
+.timeline-row { display: grid; grid-template-columns: 18px minmax(160px, 1fr) auto; gap: 10px; align-items: center; border-top: 1px solid rgba(0,0,0,.08); padding-top: 8px; font-size: 12px; }
+.timeline-row:first-of-type { border-top: 0; padding-top: 0; }
+.timeline-icon { width: 10px; height: 10px; border-radius: 50%; background: #2f2b2d; }
+.timeline-row strong { font-size: 12px; color: #1f1f1f; font-weight: 700; }
+.timeline-row em { color: #9a554d; font-style: normal; font-weight: 800; margin-left: 6px; }
+.timeline-meta { color: #666666; font-size: 12px; }
 
 .meeting-section { margin: 0; width: 100%; background: #f9f9f9; }
 .meeting-section h2, .sketch-section h2, .right-rail h2 { font-size: 14px; font-weight: 600; }
@@ -131,7 +160,9 @@ h1, h2, h3, p { margin: 0; }
   .left-rail, .right-rail, .requirement-pane { min-height: auto; }
   .workspace-tabs { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 1px; }
   .workspace-tab { flex: 0 0 auto; white-space: nowrap; }
-  .requirement-form, .large-form, .meeting-form, .meeting-row, .payment-item, .sketch-upload-box { grid-template-columns: 1fr; }
+  .milestone-actions { align-items: stretch; }
+  .milestone-actions .primary { width: 100%; }
+  .requirement-form, .large-form, .meeting-form, .meeting-row, .payment-item, .sketch-upload-box, .dashboard-stats, .recent-project-row, .timeline-row { grid-template-columns: 1fr; }
   .payment-item span:nth-child(3) { grid-column: auto; }
   .notice { left: 12px; right: 12px; }
   .sketch-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
