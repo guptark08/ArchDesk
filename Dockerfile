@@ -5,7 +5,7 @@ COPY src ./src
 RUN mvn -q -DskipTests package
 
 FROM eclipse-temurin:17-jre
-RUN apt-get update && apt-get install -y --no-install-recommends imagemagick && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends imagemagick libheif1 libheif-examples && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /app/target/archdesk-0.0.1-SNAPSHOT.jar app.jar
 RUN mkdir -p /app/uploads

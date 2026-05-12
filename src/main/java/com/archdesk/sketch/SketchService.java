@@ -1,10 +1,12 @@
 package com.archdesk.sketch;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import org.slf4j.Logger;
@@ -24,6 +26,7 @@ import com.archdesk.project.ProjectRepository;
 public class SketchService {
     private static final Logger log = LoggerFactory.getLogger(SketchService.class);
     private static final long MAX_FILE_SIZE = 10L * 1024L * 1024L;
+    private static final Set<String> HEIC_BRANDS = Set.of("heic", "heix", "heim", "heis", "mif1", "msf1", "heif", "hevc", "hevx");
 
     private final ProjectSketchRepository sketches;
     private final ProjectRepository projects;
@@ -156,11 +159,12 @@ public class SketchService {
                 && header[11] == 0x50) {
             return ImageType.WEBP;
         }
-        if (header.length >= 8
+        if (header.length >= 12
                 && header[4] == 0x66
                 && header[5] == 0x74
                 && header[6] == 0x79
-                && header[7] == 0x70) {
+                && header[7] == 0x70
+                && HEIC_BRANDS.contains(new String(header, 8, 4, StandardCharsets.US_ASCII))) {
             return ImageType.HEIC;
         }
         throw new IllegalArgumentException("Unsupported file type");
@@ -179,17 +183,28 @@ public class SketchService {
             tempInput.toFile().deleteOnExit();
             tempOutput.toFile().deleteOnExit();
             Files.write(tempInput, input);
-            runImageMagick("magick", tempInput, tempOutput);
+            Files.deleteIfExists(tempOutput);
+            runConversionCommand(List.of("heif-convert", tempInput.toString(), tempOutput.toString()), "heif-convert");
             return Files.readAllBytes(tempOutput);
-        } catch (IOException ex) {
+        } catch (IOException primaryEx) {
             if (tempInput != null && tempOutput != null) {
                 try {
-                    runImageMagick("convert", tempInput, tempOutput);
+                    Files.deleteIfExists(tempOutput);
+                    runConversionCommand(List.of("magick", tempInput.toString(), tempOutput.toString()), "ImageMagick magick");
                     return Files.readAllBytes(tempOutput);
-                } catch (IOException fallbackEx) {
+                } catch (IOException magickEx) {
+                    try {
+                        Files.deleteIfExists(tempOutput);
+                        runConversionCommand(List.of("convert", tempInput.toString(), tempOutput.toString()), "ImageMagick convert");
+                        return Files.readAllBytes(tempOutput);
+                    } catch (IOException convertEx) {
+                        log.warn("Unable to convert HEIC image. heif-convert: {}; magick: {}; convert: {}",
+                                primaryEx.getMessage(), magickEx.getMessage(), convertEx.getMessage());
+                    }
                     throw new IllegalArgumentException("Unable to convert HEIC image");
                 }
             }
+            log.warn("Unable to prepare HEIC conversion", primaryEx);
             throw new IllegalArgumentException("Unable to convert HEIC image");
         } finally {
             deleteTemp(tempInput);
@@ -197,16 +212,22 @@ public class SketchService {
         }
     }
 
-    private void runImageMagick(String command, Path input, Path output) throws IOException {
-        Process process = new ProcessBuilder(command, input.toString(), output.toString()).start();
+    private void runConversionCommand(List<String> command, String label) throws IOException {
+        Process process = new ProcessBuilder(command)
+                .redirectErrorStream(true)
+                .start();
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
         try {
             int exitCode = process.waitFor();
             if (exitCode != 0) {
-                throw new IOException("ImageMagick exited with " + exitCode);
+                if (!output.isBlank()) {
+                    log.warn("{} conversion failed with exit code {}: {}", label, exitCode, output);
+                }
+                throw new IOException(label + " exited with " + exitCode);
             }
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
-            throw new IOException("ImageMagick conversion interrupted", ex);
+            throw new IOException(label + " conversion interrupted", ex);
         }
     }
 

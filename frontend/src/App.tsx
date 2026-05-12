@@ -805,11 +805,13 @@ function NewProjectForm({
 }
 
 function projectPayload(project: ProjectPayload | ProjectDraft | Project): ProjectPayload {
+  const approximateBudget = 'approximateBudget' in project ? project.approximateBudget : undefined;
   return {
     name: project.name,
     projectType: project.projectType,
     status: project.status,
     plotSize: project.plotSize,
+    approximateBudget,
     requirements: project.requirements,
     notes: project.notes,
     startDate: project.startDate || undefined,
