@@ -18,7 +18,6 @@ import {
   login,
   logout,
   sketchUrl,
-  updateClient,
   updateFee,
   updateProject,
   uploadSketch,
@@ -833,6 +832,8 @@ function ProjectRequirementForm({
 }) {
   const [form, setForm] = useState(project);
   const [totalCosting, setTotalCosting] = useState(project.ledger.totalAgreedFee);
+  const sqft = plotSqft(form.plotSize);
+  const estimatedCost = estimateCost(form.plotSize);
 
   useEffect(() => {
     setForm(project);
@@ -847,12 +848,12 @@ function ProjectRequirementForm({
   }
 
   async function markStarted() {
-    await updateProject(clientId, project.id, projectPayload({ ...form, startDate: today() }));
+    await updateProject(clientId, project.id, projectPayload({ ...project, startDate: today() }));
     await onSaved();
   }
 
   async function markDelivered() {
-    await updateProject(clientId, project.id, projectPayload({ ...form, actualCompletion: today() }));
+    await updateProject(clientId, project.id, projectPayload({ ...project, actualCompletion: today() }));
     await onSaved();
   }
 
@@ -862,6 +863,14 @@ function ProjectRequirementForm({
       <label>Type<select value={form.projectType} onChange={(event) => setForm({ ...form, projectType: event.target.value as ProjectType })}>{projectTypes.map((type) => <option key={type} value={type}>{label(type)}</option>)}</select></label>
       <label>Status<select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as ProjectStatus })}>{projectStatuses.map((status) => <option key={status} value={status}>{label(status)}</option>)}</select></label>
       <label>Plot size<input value={form.plotSize ?? ''} onChange={(event) => setForm({ ...form, plotSize: event.target.value })} /></label>
+      <div className="estimate-box">
+        <span className="estimate-title">Estimate cost</span>
+        <span>Parsed area</span>
+        <strong>{sqft === null ? '-' : `${sqft.toLocaleString('en-IN')} sq ft`}</strong>
+        <span>Estimated cost @ ₹1.65/sqft</span>
+        <strong>{estimatedCost === null ? '-' : inr(estimatedCost)}</strong>
+        <button type="button" className="primary" disabled={estimatedCost === null} onClick={() => estimatedCost !== null && setTotalCosting(estimatedCost)}>Use estimate</button>
+      </div>
       <label>Expected completion<input type="date" value={form.expectedCompletion ?? ''} onChange={(event) => setForm({ ...form, expectedCompletion: event.target.value })} /></label>
       <div className="milestone-actions">
         <button type="button" className="primary" disabled={Boolean(project.startDate)} onClick={markStarted}>Started</button>
@@ -890,7 +899,7 @@ function MilestoneTimeline({ project }: { project: Project }) {
 
   const expectedOverdue = Boolean(
     project.expectedCompletion
-    && new Date(project.expectedCompletion) < new Date()
+    && project.expectedCompletion < today()
     && !project.actualCompletion
     && project.status !== 'COMPLETED',
   );
@@ -1112,6 +1121,28 @@ function daysBetween(startIso: string, endIso: string): number {
   const start = new Date(`${startIso}T00:00:00`);
   const end = new Date(`${endIso}T00:00:00`);
   return Math.max(0, Math.round((end.getTime() - start.getTime()) / 86400000));
+}
+
+function plotSqft(plotSize?: string): number | null {
+  if (!plotSize) return null;
+  const normalized = plotSize.toLowerCase().replace(/,/g, '').trim();
+  const dimensionMatch = normalized.match(/(\d+(?:\.\d+)?)\s*(?:ft|feet|foot)?\s*(?:x|\*|by)\s*(\d+(?:\.\d+)?)/);
+  if (dimensionMatch) {
+    const width = Number(dimensionMatch[1]);
+    const length = Number(dimensionMatch[2]);
+    const area = width * length;
+    return area > 0 ? Math.round(area) : null;
+  }
+  const singleMatch = normalized.match(/(\d+(?:\.\d+)?)/);
+  if (!singleMatch) return null;
+  const area = Number(singleMatch[1]);
+  return area > 0 ? Math.round(area) : null;
+}
+
+function estimateCost(plotSize?: string): number | null {
+  const area = plotSqft(plotSize);
+  if (area === null) return null;
+  return Math.max(1200, Math.round(area * 1.65));
 }
 
 function timeAgo(isoString: string): string {

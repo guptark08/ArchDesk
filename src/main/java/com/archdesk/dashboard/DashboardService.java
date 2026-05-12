@@ -19,6 +19,8 @@ import com.archdesk.project.ProjectStatus;
 
 @Service
 public class DashboardService {
+    private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Kolkata");
+
     private final ProjectRepository projects;
 
     public DashboardService(ProjectRepository projects) {
@@ -28,7 +30,7 @@ public class DashboardService {
     @Transactional(readOnly = true)
     public DashboardStats stats() {
         var allProjects = projects.findAllWithLedger();
-        YearMonth currentMonth = YearMonth.now();
+        YearMonth currentMonth = YearMonth.now(BUSINESS_ZONE);
 
         long activeProjectsCount = allProjects.stream()
                 .filter(project -> project.getStatus() == ProjectStatus.ACTIVE)
@@ -41,7 +43,7 @@ public class DashboardService {
                 .filter(project -> {
                     LocalDate completionDate = project.getActualCompletion() != null
                             ? project.getActualCompletion()
-                            : project.getUpdatedAt().atZone(ZoneId.systemDefault()).toLocalDate();
+                            : project.getUpdatedAt().atZone(BUSINESS_ZONE).toLocalDate();
                     return YearMonth.from(completionDate).equals(currentMonth);
                 })
                 .count();

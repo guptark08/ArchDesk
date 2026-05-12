@@ -64,7 +64,14 @@ h1, h2, h3, p { margin: 0; }
 .rail-project-form textarea { min-height: 58px; }
 
 .requirement-form { margin: 0 0 18px; width: 100%; min-height: 48vh; grid-template-columns: repeat(3, minmax(0, 1fr)); align-content: start; background: #f9f9f9; padding: 16px; }
-.requirement-form label { color: #3e3a3a; }
+.requirement-form label { color: #3e3a3a; align-content: start; }
+.requirement-form input, .requirement-form select { min-height: 34px; }
+.estimate-box { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 10px; background: #ffffff; border: 1px solid #dddddd; border-radius: 6px; padding: 10px; align-content: start; }
+.estimate-title { grid-column: 1 / -1; font-size: 12px !important; font-weight: 700; color: #3e3a3a !important; }
+.estimate-box span { font-size: 11px; color: #666666; }
+.estimate-box strong { font-size: 13px; color: #1f1f1f; text-align: right; }
+.estimate-box .primary { grid-column: 1 / -1; margin-top: 4px; width: 100%; }
+.estimate-box .primary:disabled { opacity: .55; cursor: not-allowed; }
 .form-wide { grid-column: 1 / -1; }
 .costing-field { grid-column: 1 / 2; }
 .milestone-actions { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
