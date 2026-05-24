@@ -35,7 +35,8 @@ Override these with `APP_ADMIN_EMAIL` and `APP_ADMIN_PASSWORD`.
 
 ## Production Notes
 
-- Netlify hosts only the React frontend. Deploy the Spring Boot backend separately and set `VITE_API_BASE_URL` in Netlify to that backend URL.
+- Netlify hosts only the React frontend; the Spring Boot backend must be deployed separately.
+- This Netlify deployment proxies `/api/*` and `/uploads/*` to `https://archdesk-production.up.railway.app`, avoiding browser CORS issues.
 - Railway internal URLs such as `*.railway.internal` only work inside Railway. For Netlify, use the backend service's public Railway domain, usually `https://<service>.up.railway.app`.
 - The backend CORS configuration currently allows `https://archdesk.netlify.app`.
 - The backend reads Railway's `PORT` environment variable automatically.

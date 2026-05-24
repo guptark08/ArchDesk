@@ -4,7 +4,19 @@
   publish = "dist"
 
 [build.environment]
-  VITE_API_BASE_URL = "https://archdesk-production.up.railway.app"
+  VITE_USE_SAME_ORIGIN_API = "true"
+
+[[redirects]]
+  from = "/api/*"
+  to = "https://archdesk-production.up.railway.app/api/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/uploads/*"
+  to = "https://archdesk-production.up.railway.app/uploads/:splat"
+  status = 200
+  force = true
 
 [[redirects]]
   from = "/*"

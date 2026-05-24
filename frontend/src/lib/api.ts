@@ -1,10 +1,11 @@
 import type { ClientDetail, ClientSummary, DashboardStats, Ledger, PaymentMode, PaymentStage, Project, ProjectStatus, ProjectType, Sketch } from '../types';
 
 const configuredApiBase = import.meta.env.VITE_API_BASE_URL?.trim();
-const API_BASE = configuredApiBase || (import.meta.env.DEV ? 'http://localhost:8080' : '');
+const useSameOriginApi = import.meta.env.VITE_USE_SAME_ORIGIN_API === 'true';
+const API_BASE = useSameOriginApi ? '' : configuredApiBase || (import.meta.env.DEV ? 'http://localhost:8080' : '');
 
 function apiUrl(path: string): string {
-  if (!API_BASE) {
+  if (!API_BASE && !useSameOriginApi) {
     throw new Error('Backend URL is not configured. Set VITE_API_BASE_URL in Netlify to your deployed Spring Boot backend URL.');
   }
   return `${API_BASE}${path}`;
