@@ -1,6 +1,14 @@
 import type { ClientDetail, ClientSummary, DashboardStats, Ledger, PaymentMode, PaymentStage, Project, ProjectStatus, ProjectType, Sketch } from '../types';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
+const configuredApiBase = import.meta.env.VITE_API_BASE_URL?.trim();
+const API_BASE = configuredApiBase || (import.meta.env.DEV ? 'http://localhost:8080' : '');
+
+function apiUrl(path: string): string {
+  if (!API_BASE) {
+    throw new Error('Backend URL is not configured. Set VITE_API_BASE_URL in Netlify to your deployed Spring Boot backend URL.');
+  }
+  return `${API_BASE}${path}`;
+}
 
 function token() {
   return localStorage.getItem('archdesk.token');
@@ -12,7 +20,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const authToken = token();
   if (authToken) headers.set('Authorization', `Bearer ${authToken}`);
 
-  const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  const response = await fetch(apiUrl(path), { ...options, headers });
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
       logout();
@@ -159,7 +167,7 @@ export async function uploadSketch(projectId: number, file: File, caption?: stri
   const authToken = token();
   if (authToken) headers.set('Authorization', `Bearer ${authToken}`);
 
-  const response = await fetch(`${API_BASE}/api/projects/${projectId}/sketches`, {
+  const response = await fetch(apiUrl(`/api/projects/${projectId}/sketches`), {
     method: 'POST',
     headers,
     body: form,
@@ -179,7 +187,7 @@ export function deleteSketch(projectId: number, sketchId: number): Promise<void>
 }
 
 export function sketchUrl(projectId: number, fileName: string): string {
-  return `${API_BASE}/uploads/sketches/${projectId}/${fileName}`;
+  return apiUrl(`/uploads/sketches/${projectId}/${fileName}`);
 }
 
 async function handleResponse<T>(response: Response): Promise<T> {
