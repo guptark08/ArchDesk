@@ -1,6 +1,6 @@
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ChevronLeft, ChevronRight, Home, LogOut, Plus, Search, Trash2, Upload, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CreditCard, FileText, Home, LogOut, Plus, Search, Trash2, Upload, Users, X } from 'lucide-react';
 import {
   addNote,
   addPayment,
@@ -182,6 +182,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   const [projectDraft, setProjectDraft] = useState<ProjectDraft | null>(null);
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>(initialWorkspace.workspaceTab);
   const [paymentTab, setPaymentTab] = useState<PaymentTab>(initialWorkspace.paymentTab);
+  const [mobilePanel, setMobilePanel] = useState<'sidebar' | 'main' | 'payment'>('sidebar');
 
   const selectedProject = useMemo(
     () => {
@@ -190,6 +191,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     },
     [detail, selectedProjectId, showNewClient, showNewProject],
   );
+
+  const hasPayment = Boolean(selectedProject && !showNewProject);
+
+  useEffect(() => {
+    if (!hasPayment && mobilePanel === 'payment') setMobilePanel('main');
+  }, [hasPayment, mobilePanel]);
 
   const visibleDraft = detail && projectDraft?.clientId === detail.id ? projectDraft : null;
 
@@ -252,6 +259,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setShowNewProject(false);
     setWorkspaceTab('requirements');
     setPaymentTab('payments');
+    setMobilePanel('main');
   }
 
   function openProjectDraft() {
@@ -262,6 +270,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setSelectedProjectId(null);
     setWorkspaceTab('requirements');
     setPaymentTab('payments');
+    setMobilePanel('main');
   }
 
   function selectProject(id: number) {
@@ -270,6 +279,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setSelectedProjectId(id);
     setWorkspaceTab('requirements');
     setPaymentTab('payments');
+    setMobilePanel('main');
   }
 
   function goHome() {
@@ -283,6 +293,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setProjectDraft(null);
     setWorkspaceTab('requirements');
     setPaymentTab('payments');
+    setMobilePanel('sidebar');
     refresh(null, null, '').catch((err) => setMessage(err.message));
   }
 
@@ -298,12 +309,12 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   }
 
   return (
-    <main className={selectedProject && !showNewProject ? 'dashboard-shell' : 'dashboard-shell no-payment'}>
+    <main className={hasPayment ? 'dashboard-shell' : 'dashboard-shell no-payment'}>
       <header className="mock-topbar">
         <strong>DASHBOARD</strong>
         <div className="top-search"><Search size={14} /><input placeholder="enter client name or number" value={query} onChange={(event) => setQuery(event.target.value)} /></div>
         <button className="home-button" onClick={goHome}>
-          <Home size={15} /> Home
+          <Home size={15} /> <span>Home</span>
         </button>
         <button
           className="top-action"
@@ -315,14 +326,15 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             setShowNewProject(false);
             setWorkspaceTab('requirements');
             setPaymentTab('payments');
+            setMobilePanel('main');
           }}
         >
-          <Plus size={15} /> New Client
+          <Plus size={15} /> <span>New Client</span>
         </button>
-        <button className="logout-button" title="Logout" onClick={onLogout}><LogOut size={16} /> Logout</button>
+        <button className="logout-button" title="Logout" onClick={onLogout}><LogOut size={16} /> <span>Logout</span></button>
       </header>
       {message && <button className="notice" onClick={() => setMessage('')}>{message}</button>}
-      <section className="mock-grid">
+      <section className="mock-grid" data-panel={mobilePanel}>
         <ClientSidebar
           clients={clients}
           selectedClient={detail}
@@ -347,6 +359,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             setSelectedClientId(client.id);
             setWorkspaceTab('requirements');
             setPaymentTab('payments');
+            setMobilePanel('main');
             await refresh(client.id, null);
           }}
           onTabChange={setWorkspaceTab}
@@ -361,6 +374,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             setSelectedProjectId(project.id);
             setWorkspaceTab('requirements');
             setPaymentTab('payments');
+            setMobilePanel('main');
             await refresh(detail?.id ?? null, project.id);
           }}
           onProjectUpdated={async () => refresh(detail?.id ?? null, selectedProjectId)}
@@ -374,9 +388,10 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             setShowNewProject(false);
             setWorkspaceTab('requirements');
             setPaymentTab('payments');
+            setMobilePanel('main');
           }}
         />
-        {selectedProject && !showNewProject && (
+        {hasPayment && (
           <PaymentSidebar
             project={selectedProject}
             activeTab={paymentTab}
@@ -385,6 +400,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           />
         )}
       </section>
+      <MobileNav panel={mobilePanel} onPanel={setMobilePanel} hasPayment={hasPayment} />
     </main>
   );
 }
@@ -1157,6 +1173,35 @@ function timeAgo(isoString: string): string {
 
 function Badge({ value }: { value: string }) {
   return <span className={`badge ${value.toLowerCase()}`}>{label(value)}</span>;
+}
+
+function MobileNav({
+  panel,
+  onPanel,
+  hasPayment,
+}: {
+  panel: 'sidebar' | 'main' | 'payment';
+  onPanel: (p: 'sidebar' | 'main' | 'payment') => void;
+  hasPayment: boolean;
+}) {
+  return (
+    <nav className="mobile-nav" aria-label="Main navigation">
+      <button className={`mobile-nav-btn${panel === 'sidebar' ? ' active' : ''}`} onClick={() => onPanel('sidebar')}>
+        <Users size={18} />
+        <span>Clients</span>
+      </button>
+      <button className={`mobile-nav-btn${panel === 'main' ? ' active' : ''}`} onClick={() => onPanel('main')}>
+        <FileText size={18} />
+        <span>Project</span>
+      </button>
+      {hasPayment && (
+        <button className={`mobile-nav-btn${panel === 'payment' ? ' active' : ''}`} onClick={() => onPanel('payment')}>
+          <CreditCard size={18} />
+          <span>Payments</span>
+        </button>
+      )}
+    </nav>
+  );
 }
 
 createRoot(document.getElementById('root')!).render(
