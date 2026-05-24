@@ -18,13 +18,16 @@ import {
   login,
   logout,
   sketchUrl,
+  updateClient,
   updateFee,
+  updateNote,
+  updatePayment,
   updateProject,
   uploadSketch,
 } from './lib/api';
 import { inr, label, today } from './lib/format';
 import type { ClientDetail, ClientSummary, DashboardStats, PaymentMode, PaymentStage, Project, ProjectStatus, ProjectType, RecentProjectItem, Sketch } from './types';
-import type { ProjectPayload } from './lib/api';
+import type { ClientPayload, ProjectPayload } from './lib/api';
 import './styles.css';
 
 const projectTypes: ProjectType[] = ['RESIDENTIAL', 'COMMERCIAL', 'RENOVATION'];
@@ -39,6 +42,7 @@ type PaymentTab = 'payments' | 'history';
 type WorkspaceMode = 'new_client' | 'new_project' | 'project';
 
 interface StoredWorkspaceState {
+  version: 1;
   selectedClientId: number | null;
   selectedProjectId: number | null;
   query: string;
@@ -47,10 +51,14 @@ interface StoredWorkspaceState {
   paymentTab: PaymentTab;
 }
 
-const workspaceStorageKey = 'archdesk.workspace.v2';
+const workspaceStorageKey = 'archdesk.workspace';
+const legacyWorkspaceStorageKey = 'archdesk.workspace.v2';
+const workspaceStorageVersion = 1;
+const clientListLimit = 100;
 
 function defaultWorkspaceState(): StoredWorkspaceState {
   return {
+    version: workspaceStorageVersion,
     selectedClientId: null,
     selectedProjectId: null,
     query: '',
@@ -62,10 +70,13 @@ function defaultWorkspaceState(): StoredWorkspaceState {
 
 function readWorkspaceState(): StoredWorkspaceState {
   try {
-    const raw = localStorage.getItem(workspaceStorageKey);
+    const current = localStorage.getItem(workspaceStorageKey);
+    const raw = current ?? localStorage.getItem(legacyWorkspaceStorageKey);
     if (!raw) return defaultWorkspaceState();
     const parsed = JSON.parse(raw) as Partial<StoredWorkspaceState>;
+    if (current && parsed.version !== workspaceStorageVersion) return defaultWorkspaceState();
     return {
+      version: workspaceStorageVersion,
       selectedClientId: typeof parsed.selectedClientId === 'number' ? parsed.selectedClientId : null,
       selectedProjectId: typeof parsed.selectedProjectId === 'number' ? parsed.selectedProjectId : null,
       query: typeof parsed.query === 'string' ? parsed.query : '',
@@ -79,11 +90,13 @@ function readWorkspaceState(): StoredWorkspaceState {
 }
 
 function writeWorkspaceState(state: StoredWorkspaceState) {
-  localStorage.setItem(workspaceStorageKey, JSON.stringify(state));
+  localStorage.setItem(workspaceStorageKey, JSON.stringify({ ...state, version: workspaceStorageVersion }));
+  localStorage.removeItem(legacyWorkspaceStorageKey);
 }
 
 function clearWorkspaceState() {
   localStorage.removeItem(workspaceStorageKey);
+  localStorage.removeItem(legacyWorkspaceStorageKey);
 }
 
 function clientDefaults() {
@@ -94,8 +107,37 @@ function clientDefaults() {
     addressLocality: '',
     defaultProjectType: 'RESIDENTIAL' as ProjectType,
     plotSize: '',
+    approximateBudget: '',
     projectStatus: 'ACTIVE' as ProjectStatus,
     generalNotes: '',
+  };
+}
+
+function clientDraft(client: ClientDetail) {
+  return {
+    fullName: client.fullName,
+    phoneNumber: client.phoneNumber,
+    emailAddress: client.emailAddress ?? '',
+    addressLocality: client.addressLocality ?? '',
+    defaultProjectType: client.defaultProjectType,
+    plotSize: client.plotSize ?? '',
+    approximateBudget: client.approximateBudget?.toString() ?? '',
+    projectStatus: client.projectStatus,
+    generalNotes: client.generalNotes ?? '',
+  };
+}
+
+function clientPayload(client: ReturnType<typeof clientDefaults> | ReturnType<typeof clientDraft>): ClientPayload {
+  return {
+    fullName: client.fullName,
+    phoneNumber: client.phoneNumber,
+    emailAddress: client.emailAddress,
+    addressLocality: client.addressLocality,
+    defaultProjectType: client.defaultProjectType,
+    plotSize: client.plotSize,
+    approximateBudget: client.approximateBudget === '' ? undefined : Number(client.approximateBudget),
+    projectStatus: client.projectStatus,
+    generalNotes: client.generalNotes,
   };
 }
 
@@ -204,14 +246,27 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     if (!hasPayment && mobilePanel === 'payment') setMobilePanel('main');
   }, [hasPayment, mobilePanel]);
 
+  useEffect(() => {
+    if (!message) return undefined;
+    const handle = window.setTimeout(() => setMessage(''), 4000);
+    return () => window.clearTimeout(handle);
+  }, [message]);
+
   const visibleDraft = detail && projectDraft?.clientId === detail.id ? projectDraft : null;
 
-  async function refresh(clientId = selectedClientId, projectId = selectedProjectId, searchText = query) {
-    const params = new URLSearchParams();
-    if (searchText.trim().length >= 2) params.set('search', searchText.trim());
-    params.set('sort', 'created_desc');
-    setClients(await listClients(params));
+  function showMessage(messageText: string) {
+    setMessage(messageText);
+  }
 
+  async function refreshClientList(searchText = query) {
+    const params = new URLSearchParams();
+    if (searchText.trim().length >= 1) params.set('search', searchText.trim());
+    params.set('sort', 'created_desc');
+    params.set('limit', String(clientListLimit));
+    setClients(await listClients(params));
+  }
+
+  async function refreshClientDetail(clientId = selectedClientId, projectId = selectedProjectId, preserveDraft = false) {
     if (!clientId) return;
     let fresh: ClientDetail;
     try {
@@ -229,9 +284,14 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setSelectedClientId(fresh.id);
     const nextProject = fresh.projects.find((project) => project.id === projectId) ?? fresh.projects[0] ?? null;
     setSelectedProjectId(nextProject?.id ?? null);
-    if (showNewProject) {
+    if (preserveDraft) {
       setProjectDraft((draft) => (draft?.clientId === fresh.id ? draft : { ...projectDefaults(fresh), clientId: fresh.id }));
     }
+  }
+
+  async function refreshWorkspace(clientId = selectedClientId, projectId = selectedProjectId, searchText = query, preserveDraft = false) {
+    await refreshClientList(searchText);
+    await refreshClientDetail(clientId, projectId, preserveDraft);
   }
 
   function workspaceMode(): WorkspaceMode {
@@ -241,12 +301,19 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
   }
 
   useEffect(() => {
-    const handle = window.setTimeout(() => refresh().catch((err) => setMessage(err.message)), 250);
+    const handle = window.setTimeout(() => refreshClientList().catch((err) => showMessage(err.message)), 250);
     return () => window.clearTimeout(handle);
   }, [query]);
 
   useEffect(() => {
+    if (!initialWorkspace.selectedClientId) return;
+    refreshClientDetail(initialWorkspace.selectedClientId, initialWorkspace.selectedProjectId, initialWorkspace.mode === 'new_project')
+      .catch((err) => showMessage(err.message));
+  }, []);
+
+  useEffect(() => {
     writeWorkspaceState({
+      version: workspaceStorageVersion,
       selectedClientId,
       selectedProjectId,
       query,
@@ -300,7 +367,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setWorkspaceTab('requirements');
     setPaymentTab('payments');
     setMobilePanel('sidebar');
-    refresh(null, null, '').catch((err) => setMessage(err.message));
+    refreshClientList('').catch((err) => showMessage(err.message));
   }
 
   async function removeClient() {
@@ -311,7 +378,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
     setSelectedProjectId(null);
     setShowNewClient(false);
     setProjectDraft(null);
-    await refresh(null, null);
+    await refreshClientList();
   }
 
   return (
@@ -351,6 +418,10 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           onSelectProject={selectProject}
           onDeleteClient={removeClient}
           onOpenProjectDraft={openProjectDraft}
+          onClientUpdated={async (client) => {
+            setDetail(client);
+            await refreshWorkspace(client.id, selectedProjectId);
+          }}
         />
         <RequirementPane
           client={detail}
@@ -368,7 +439,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             setWorkspaceTab('requirements');
             setPaymentTab('payments');
             setMobilePanel('main');
-            await refresh(client.id, project.id);
+            await refreshWorkspace(client.id, project.id);
           }}
           onClientProjectFailed={async (client, draft, errorMessage) => {
             setShowNewClient(false);
@@ -380,8 +451,8 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             setWorkspaceTab('requirements');
             setPaymentTab('payments');
             setMobilePanel('main');
-            setMessage(errorMessage);
-            await refresh(client.id, null);
+            showMessage(errorMessage);
+            await refreshWorkspace(client.id, null, query, true);
           }}
           onTabChange={setWorkspaceTab}
           onProjectDraftChange={setProjectDraft}
@@ -396,10 +467,11 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             setWorkspaceTab('requirements');
             setPaymentTab('payments');
             setMobilePanel('main');
-            await refresh(detail?.id ?? null, project.id);
+            await refreshWorkspace(detail?.id ?? null, project.id);
           }}
-          onProjectUpdated={async () => refresh(detail?.id ?? null, selectedProjectId)}
-          onProjectDeleted={async () => refresh(detail?.id ?? null, null)}
+          onProjectUpdated={async () => refreshClientDetail(detail?.id ?? null, selectedProjectId)}
+          onProjectDeleted={async () => refreshWorkspace(detail?.id ?? null, null)}
+          onOpenProjectDraft={openProjectDraft}
           onNavigateToProject={async (clientId, projectId) => {
             const fresh = await getClient(clientId);
             setDetail(fresh);
@@ -417,7 +489,7 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
             project={selectedProject}
             activeTab={paymentTab}
             onTabChange={setPaymentTab}
-            refresh={() => refresh(detail?.id ?? null, selectedProject?.id ?? null)}
+            refresh={() => refreshClientDetail(detail?.id ?? null, selectedProject?.id ?? null)}
           />
         )}
       </section>
@@ -436,28 +508,25 @@ function ClientSidebar({
   onSelectProject,
   onDeleteClient,
   onOpenProjectDraft,
+  onClientUpdated,
 }: {
   clients: ClientSummary[];
   selectedClient: ClientDetail | null;
   selectedProjectId: number | null;
   showNewProject: boolean;
   projectDraft: ProjectDraft | null;
-  onSelectClient: (id: number) => void;
+  onSelectClient: (id: number) => Promise<void> | void;
   onSelectProject: (id: number) => void;
   onDeleteClient: () => void;
   onOpenProjectDraft: () => void;
+  onClientUpdated: (client: ClientDetail) => Promise<void>;
 }) {
+  const [selectingId, setSelectingId] = useState<number | null>(null);
+
   return (
     <aside className="left-rail">
       {selectedClient && (
-        <div className="client-profile-block">
-          <div className="rail-heading">Client Profile</div>
-          <strong>{selectedClient.fullName}</strong>
-          <span>{selectedClient.phoneNumber}</span>
-          <span>{selectedClient.addressLocality || 'No locality'}</span>
-          <span>{label(selectedClient.projectStatus)} · {selectedClient.projects.length} project(s)</span>
-          <button className="rail-link danger-link" onClick={onDeleteClient}>delete client</button>
-        </div>
+        <ClientProfile client={selectedClient} onDeleteClient={onDeleteClient} onSaved={onClientUpdated} />
       )}
 
       {selectedClient && (
@@ -490,13 +559,101 @@ function ClientSidebar({
       <div className="all-clients">
         <div className="rail-heading">All Clients</div>
         {clients.map((client) => (
-          <button key={client.id} className="client-picker" onClick={() => onSelectClient(client.id)}>
+          <button key={client.id} className="client-picker" disabled={selectingId === client.id} onClick={async () => {
+            setSelectingId(client.id);
+            try {
+              await onSelectClient(client.id);
+            } finally {
+              setSelectingId(null);
+            }
+          }}
+          >
             <strong>{client.fullName}</strong>
             <span>{client.projectCount} project(s)</span>
           </button>
         ))}
       </div>
     </aside>
+  );
+}
+
+function ClientProfile({
+  client,
+  onDeleteClient,
+  onSaved,
+}: {
+  client: ClientDetail;
+  onDeleteClient: () => Promise<void> | void;
+  onSaved: (client: ClientDetail) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState(clientDraft(client));
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    setForm(clientDraft(client));
+    setEditing(false);
+  }, [client]);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      const saved = await updateClient(client.id, clientPayload(form));
+      await onSaved(saved);
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <form className="client-profile-block client-edit-form" onSubmit={submit}>
+        <div className="rail-heading">Edit Client</div>
+        <label>Name<input required value={form.fullName} onChange={(event) => setForm({ ...form, fullName: event.target.value })} /></label>
+        <label>Phone<input required value={form.phoneNumber} onChange={(event) => setForm({ ...form, phoneNumber: event.target.value })} /></label>
+        <label>Email<input value={form.emailAddress} onChange={(event) => setForm({ ...form, emailAddress: event.target.value })} /></label>
+        <label>Locality<input value={form.addressLocality} onChange={(event) => setForm({ ...form, addressLocality: event.target.value })} /></label>
+        <label>Project type<select value={form.defaultProjectType} onChange={(event) => setForm({ ...form, defaultProjectType: event.target.value as ProjectType })}>{projectTypes.map((type) => <option key={type} value={type}>{label(type)}</option>)}</select></label>
+        <label>Status<select value={form.projectStatus} onChange={(event) => setForm({ ...form, projectStatus: event.target.value as ProjectStatus })}>{projectStatuses.map((status) => <option key={status} value={status}>{label(status)}</option>)}</select></label>
+        <label>Plot size<input value={form.plotSize} onChange={(event) => setForm({ ...form, plotSize: event.target.value })} /></label>
+        <label>Budget<input type="number" min="0" value={form.approximateBudget} onChange={(event) => setForm({ ...form, approximateBudget: event.target.value })} /></label>
+        <label>Notes<textarea value={form.generalNotes} onChange={(event) => setForm({ ...form, generalNotes: event.target.value })} /></label>
+        <div className="compact-actions">
+          <button className="primary" disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
+          <button type="button" className="danger" disabled={saving} onClick={() => {
+            setForm(clientDraft(client));
+            setEditing(false);
+          }}
+          >Cancel</button>
+        </div>
+      </form>
+    );
+  }
+
+  return (
+    <div className="client-profile-block">
+      <div className="rail-heading">Client Profile</div>
+      <strong>{client.fullName}</strong>
+      <span>{client.phoneNumber}</span>
+      <span>{client.emailAddress || 'No email'}</span>
+      <span>{client.addressLocality || 'No locality'}</span>
+      <span>{label(client.projectStatus)} · {client.projects.length} project(s)</span>
+      <div className="compact-actions">
+        <button type="button" className="rail-link" onClick={() => setEditing(true)}>edit client</button>
+        <button type="button" className="rail-link danger-link" disabled={deleting} onClick={async () => {
+          setDeleting(true);
+          try {
+            await onDeleteClient();
+          } finally {
+            setDeleting(false);
+          }
+        }}
+        >{deleting ? 'deleting...' : 'delete client'}</button>
+      </div>
+    </div>
   );
 }
 
@@ -515,6 +672,7 @@ function RequirementPane({
   onProjectSaved,
   onProjectUpdated,
   onProjectDeleted,
+  onOpenProjectDraft,
   onNavigateToProject,
 }: {
   client: ClientDetail | null;
@@ -531,6 +689,7 @@ function RequirementPane({
   onProjectSaved: (project: Project) => Promise<void>;
   onProjectUpdated: () => Promise<void>;
   onProjectDeleted: () => Promise<void>;
+  onOpenProjectDraft: () => void;
   onNavigateToProject: (clientId: number, projectId: number) => Promise<void>;
 }) {
   return (
@@ -546,7 +705,12 @@ function RequirementPane({
           onSaved={onProjectSaved}
         />
       )}
-      {client && !showNewProject && !project && <div className="empty-workspace">Add a project under {client.fullName} to begin requirements.</div>}
+      {client && !showNewProject && !project && (
+        <div className="empty-workspace">
+          <span>Add a project under {client.fullName} to begin requirements.</span>
+          <button type="button" className="primary" onClick={onOpenProjectDraft}><Plus size={14} /> New Project</button>
+        </div>
+      )}
       {client && !showNewProject && project && (
         <>
           <h1>Project: Requirement :-</h1>
@@ -701,6 +865,11 @@ function PaymentSidebar({
   refresh: () => Promise<void>;
 }) {
   const [payment, setPayment] = useState({ amount: 0, paymentDate: today(), mode: 'UPI' as PaymentMode, stage: 'TOKEN' as PaymentStage, notes: '' });
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editPayment, setEditPayment] = useState({ amount: 0, paymentDate: today(), mode: 'UPI' as PaymentMode, stage: 'TOKEN' as PaymentStage, notes: '' });
+  const [updatingId, setUpdatingId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   if (!project) {
     return <aside className="right-rail"><h2>Payments</h2><p className="rail-empty">Select a project to view payments.</p></aside>;
@@ -740,9 +909,14 @@ function PaymentSidebar({
         {activeTab === 'payments' && (
           <form className="rail-form" onSubmit={async (event) => {
             event.preventDefault();
-            await addPayment(project.id, { ...payment, amount: Number(payment.amount || 0) });
-            setPayment({ amount: 0, paymentDate: today(), mode: 'UPI', stage: 'PROGRESS', notes: '' });
-            await refresh();
+            setAdding(true);
+            try {
+              await addPayment(project.id, { ...payment, amount: Number(payment.amount || 0) });
+              setPayment({ amount: 0, paymentDate: today(), mode: 'UPI', stage: 'PROGRESS', notes: '' });
+              await refresh();
+            } finally {
+              setAdding(false);
+            }
           }}
           >
             <strong>Received Payment</strong>
@@ -751,23 +925,65 @@ function PaymentSidebar({
             <label>Mode<select value={payment.mode} onChange={(event) => setPayment({ ...payment, mode: event.target.value as PaymentMode })}>{paymentModes.map((mode) => <option key={mode} value={mode}>{label(mode)}</option>)}</select></label>
             <label>Stage<select value={payment.stage} onChange={(event) => setPayment({ ...payment, stage: event.target.value as PaymentStage })}>{paymentStages.map((stage) => <option key={stage} value={stage}>{label(stage)}</option>)}</select></label>
             <label>Note<input value={payment.notes} onChange={(event) => setPayment({ ...payment, notes: event.target.value })} /></label>
-            <button className="primary">Add payment</button>
+            <button className="primary" disabled={adding}>{adding ? 'Adding...' : 'Add payment'}</button>
           </form>
         )}
         {activeTab === 'history' && (
           <div className="payment-list">
             {!project.ledger.entries.length && <p className="rail-empty">No payments recorded yet.</p>}
             {project.ledger.entries.map((entry) => (
-              <div className="payment-item" key={entry.id}>
-                <span>{entry.paymentDate}</span>
-                <strong>{inr(entry.amount)}</strong>
-                <span>{label(entry.stage ?? 'PROGRESS')} · {label(entry.mode)}</span>
-                <button className="icon-button" onClick={async () => {
-                  await deletePayment(project.id, entry.id);
-                  await refresh();
+              editingId === entry.id ? (
+                <form className="payment-item payment-edit-item" key={entry.id} onSubmit={async (event) => {
+                  event.preventDefault();
+                  setUpdatingId(entry.id);
+                  try {
+                    await updatePayment(project.id, entry.id, { ...editPayment, amount: Number(editPayment.amount || 0) });
+                    setEditingId(null);
+                    await refresh();
+                  } finally {
+                    setUpdatingId(null);
+                  }
                 }}
-                ><Trash2 size={14} /></button>
-              </div>
+                >
+                  <label>Amount<input type="number" min="0" value={editPayment.amount} onChange={(event) => setEditPayment({ ...editPayment, amount: Number(event.target.value) })} /></label>
+                  <label>Date<input type="date" value={editPayment.paymentDate} onChange={(event) => setEditPayment({ ...editPayment, paymentDate: event.target.value })} /></label>
+                  <label>Mode<select value={editPayment.mode} onChange={(event) => setEditPayment({ ...editPayment, mode: event.target.value as PaymentMode })}>{paymentModes.map((mode) => <option key={mode} value={mode}>{label(mode)}</option>)}</select></label>
+                  <label>Stage<select value={editPayment.stage} onChange={(event) => setEditPayment({ ...editPayment, stage: event.target.value as PaymentStage })}>{paymentStages.map((stage) => <option key={stage} value={stage}>{label(stage)}</option>)}</select></label>
+                  <label>Note<input value={editPayment.notes} onChange={(event) => setEditPayment({ ...editPayment, notes: event.target.value })} /></label>
+                  <div className="compact-actions">
+                    <button className="primary" disabled={updatingId === entry.id}>{updatingId === entry.id ? 'Saving...' : 'Save'}</button>
+                    <button type="button" className="danger" disabled={updatingId === entry.id} onClick={() => setEditingId(null)}>Cancel</button>
+                  </div>
+                </form>
+              ) : (
+                <div className="payment-item" key={entry.id}>
+                  <span>{entry.paymentDate}</span>
+                  <strong>{inr(entry.amount)}</strong>
+                  <span>{label(entry.stage ?? 'PROGRESS')} · {label(entry.mode)}</span>
+                  {entry.notes && <span>{entry.notes}</span>}
+                  <button type="button" className="rail-link" onClick={() => {
+                    setEditingId(entry.id);
+                    setEditPayment({
+                      amount: entry.amount,
+                      paymentDate: entry.paymentDate,
+                      mode: entry.mode,
+                      stage: entry.stage,
+                      notes: entry.notes ?? '',
+                    });
+                  }}
+                  >edit</button>
+                  <button className="icon-button" disabled={deletingId === entry.id} onClick={async () => {
+                    setDeletingId(entry.id);
+                    try {
+                      await deletePayment(project.id, entry.id);
+                      await refresh();
+                    } finally {
+                      setDeletingId(null);
+                    }
+                  }}
+                  ><Trash2 size={14} /></button>
+                </div>
+              )
             ))}
           </div>
         )}
@@ -822,7 +1038,7 @@ function NewClientProjectForm({
     setError('');
     let savedClient: ClientDetail | null = null;
     try {
-      savedClient = await createClient(form);
+      savedClient = await createClient(clientPayload(form));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create client');
       setSaving(false);
@@ -884,12 +1100,19 @@ function NewProjectForm({
   onDiscard: () => void;
   onSaved: (project: Project) => Promise<void>;
 }) {
+  const [saving, setSaving] = useState(false);
+
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const { clientId, ...rest } = value;
-    const payload = projectPayload(rest);
-    const saved = await createProject(client.id, payload);
-    await onSaved(saved);
+    setSaving(true);
+    try {
+      const { clientId, ...rest } = value;
+      const payload = projectPayload(rest);
+      const saved = await createProject(client.id, payload);
+      await onSaved(saved);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -904,8 +1127,8 @@ function NewProjectForm({
       <label className="form-wide">Requirement<textarea value={value.requirements} onChange={(event) => onChange({ ...value, requirements: event.target.value })} /></label>
       <label className="form-wide">Project notes<textarea value={value.notes} onChange={(event) => onChange({ ...value, notes: event.target.value })} /></label>
       <div className="form-actions">
-        <button className="primary">Save project</button>
-        <button type="button" className="danger" onClick={onDiscard}>Discard draft</button>
+        <button className="primary" disabled={saving}>{saving ? 'Saving...' : 'Save project'}</button>
+        <button type="button" className="danger" disabled={saving} onClick={onDiscard}>Discard draft</button>
       </div>
     </form>
   );
@@ -940,6 +1163,9 @@ function ProjectRequirementForm({
 }) {
   const [form, setForm] = useState(project);
   const [totalCosting, setTotalCosting] = useState(project.ledger.totalAgreedFee);
+  const [saving, setSaving] = useState(false);
+  const [milestoneAction, setMilestoneAction] = useState<'start' | 'deliver' | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const sqft = plotSqft(form.plotSize);
   const estimatedCost = estimateCost(form.plotSize);
 
@@ -950,19 +1176,34 @@ function ProjectRequirementForm({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    await updateProject(clientId, project.id, projectPayload(form));
-    await updateFee(project.id, Number(totalCosting || 0));
-    await onSaved();
+    setSaving(true);
+    try {
+      await updateProject(clientId, project.id, projectPayload(form));
+      await updateFee(project.id, Number(totalCosting || 0));
+      await onSaved();
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function markStarted() {
-    await updateProject(clientId, project.id, projectPayload({ ...project, startDate: today() }));
-    await onSaved();
+    setMilestoneAction('start');
+    try {
+      await updateProject(clientId, project.id, projectPayload({ ...project, startDate: today() }));
+      await onSaved();
+    } finally {
+      setMilestoneAction(null);
+    }
   }
 
   async function markDelivered() {
-    await updateProject(clientId, project.id, projectPayload({ ...project, actualCompletion: today() }));
-    await onSaved();
+    setMilestoneAction('deliver');
+    try {
+      await updateProject(clientId, project.id, projectPayload({ ...project, actualCompletion: today() }));
+      await onSaved();
+    } finally {
+      setMilestoneAction(null);
+    }
   }
 
   return (
@@ -977,24 +1218,30 @@ function ProjectRequirementForm({
         <strong>{sqft === null ? '-' : `${sqft.toLocaleString('en-IN')} sq ft`}</strong>
         <span>Estimated cost @ ₹1.65/sqft</span>
         <strong>{estimatedCost === null ? '-' : inr(estimatedCost)}</strong>
-        <button type="button" className="primary" disabled={estimatedCost === null} onClick={() => estimatedCost !== null && setTotalCosting(estimatedCost)}>Use estimate</button>
+        <button type="button" className="primary" disabled={estimatedCost === null || saving} onClick={() => estimatedCost !== null && setTotalCosting(estimatedCost)}>Use estimate</button>
       </div>
       <label>Expected completion<input type="date" value={form.expectedCompletion ?? ''} onChange={(event) => setForm({ ...form, expectedCompletion: event.target.value })} /></label>
       <div className="milestone-actions">
-        <button type="button" className="primary" disabled={Boolean(project.startDate)} onClick={markStarted}>Started</button>
-        <button type="button" className="primary" disabled={!project.startDate || Boolean(project.actualCompletion)} onClick={markDelivered}>Delivered</button>
+        <button type="button" className="primary" disabled={Boolean(project.startDate) || milestoneAction !== null} onClick={markStarted}>{milestoneAction === 'start' ? 'Saving...' : 'Started'}</button>
+        <button type="button" className="primary" disabled={!project.startDate || Boolean(project.actualCompletion) || milestoneAction !== null} onClick={markDelivered}>{milestoneAction === 'deliver' ? 'Saving...' : 'Delivered'}</button>
       </div>
       <label className="form-wide">Requirement<textarea value={form.requirements ?? ''} onChange={(event) => setForm({ ...form, requirements: event.target.value })} /></label>
       <label className="form-wide">Project notes<textarea value={form.notes ?? ''} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
       <label className="costing-field">Total costing after requirement<input type="number" min="0" value={totalCosting} onChange={(event) => setTotalCosting(Number(event.target.value))} /></label>
       <div className="form-actions">
-        <button className="primary">Save requirement & costing</button>
+        <button className="primary" disabled={saving}>{saving ? 'Saving...' : 'Save requirement & costing'}</button>
         <button type="button" className="danger" onClick={async () => {
           if (!window.confirm('Permanently delete this project?')) return;
-          await deleteProject(clientId, project.id);
-          await onDeleted();
+          setDeleting(true);
+          try {
+            await deleteProject(clientId, project.id);
+            await onDeleted();
+          } finally {
+            setDeleting(false);
+          }
         }}
-        >Delete project</button>
+        disabled={deleting}
+        >{deleting ? 'Deleting...' : 'Delete project'}</button>
       </div>
     </form>
   );
@@ -1040,12 +1287,22 @@ function MilestoneTimeline({ project }: { project: Project }) {
 
 function MeetingNotes({ client, refresh }: { client: ClientDetail; refresh: () => Promise<void> }) {
   const [note, setNote] = useState({ noteDate: today(), content: '' });
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editNote, setEditNote] = useState({ noteDate: today(), content: '' });
+  const [updatingId, setUpdatingId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    await addNote(client.id, note);
-    setNote({ noteDate: today(), content: '' });
-    await refresh();
+    setAdding(true);
+    try {
+      await addNote(client.id, note);
+      setNote({ noteDate: today(), content: '' });
+      await refresh();
+    } finally {
+      setAdding(false);
+    }
   }
 
   return (
@@ -1054,18 +1311,51 @@ function MeetingNotes({ client, refresh }: { client: ClientDetail; refresh: () =
       <form className="meeting-form" onSubmit={submit}>
         <input type="date" value={note.noteDate} onChange={(event) => setNote({ ...note, noteDate: event.target.value })} />
         <input required placeholder="discussion note" value={note.content} onChange={(event) => setNote({ ...note, content: event.target.value })} />
-        <button className="primary">Add</button>
+        <button className="primary" disabled={adding}>{adding ? 'Adding...' : 'Add'}</button>
       </form>
       {client.meetingNotes.map((item) => (
-        <div className="meeting-row" key={item.id}>
-          <span>{item.noteDate}</span>
-          <p>{item.content}</p>
-          <button className="icon-button" onClick={async () => {
-            await deleteNote(client.id, item.id);
-            await refresh();
+        editingId === item.id ? (
+          <form className="meeting-row meeting-edit-row" key={item.id} onSubmit={async (event) => {
+            event.preventDefault();
+            setUpdatingId(item.id);
+            try {
+              await updateNote(client.id, item.id, editNote);
+              setEditingId(null);
+              await refresh();
+            } finally {
+              setUpdatingId(null);
+            }
           }}
-          ><Trash2 size={14} /></button>
-        </div>
+          >
+            <input type="date" value={editNote.noteDate} onChange={(event) => setEditNote({ ...editNote, noteDate: event.target.value })} />
+            <input required value={editNote.content} onChange={(event) => setEditNote({ ...editNote, content: event.target.value })} />
+            <div className="compact-actions">
+              <button className="primary" disabled={updatingId === item.id}>{updatingId === item.id ? 'Saving...' : 'Save'}</button>
+              <button type="button" className="danger" disabled={updatingId === item.id} onClick={() => setEditingId(null)}>Cancel</button>
+            </div>
+          </form>
+        ) : (
+          <div className="meeting-row" key={item.id}>
+            <span>{item.noteDate}</span>
+            <p>{item.content}</p>
+            <button type="button" className="rail-link" onClick={() => {
+              setEditingId(item.id);
+              setEditNote({ noteDate: item.noteDate, content: item.content });
+            }}
+            >edit</button>
+            <button className="icon-button" disabled={deletingId === item.id} onClick={async () => {
+              if (!window.confirm('Delete this meeting note?')) return;
+              setDeletingId(item.id);
+              try {
+                await deleteNote(client.id, item.id);
+                await refresh();
+              } finally {
+                setDeletingId(null);
+              }
+            }}
+            ><Trash2 size={14} /></button>
+          </div>
+        )
       ))}
     </section>
   );
@@ -1076,6 +1366,7 @@ function SketchGallery({ project, refresh }: { project: Project; refresh: () => 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [caption, setCaption] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [deletingSketchId, setDeletingSketchId] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const sketches = project.sketches ?? [];
@@ -1116,6 +1407,7 @@ function SketchGallery({ project, refresh }: { project: Project; refresh: () => 
 
   async function removeSketch(sketch: Sketch) {
     if (!window.confirm('Delete this sketch?')) return;
+    setDeletingSketchId(sketch.id);
     try {
       await deleteSketch(project.id, sketch.id);
       const nextIndex = activeIndex === null ? null : Math.min(activeIndex, Math.max(0, sketches.length - 2));
@@ -1123,6 +1415,8 @@ function SketchGallery({ project, refresh }: { project: Project; refresh: () => 
       setActiveIndex(sketches.length <= 1 ? null : nextIndex);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Delete failed');
+    } finally {
+      setDeletingSketchId(null);
     }
   }
 
@@ -1194,7 +1488,7 @@ function SketchGallery({ project, refresh }: { project: Project; refresh: () => 
             <img src={sketchUrl(project.id, activeSketch.fileName)} alt={activeSketch.caption || activeSketch.originalName} />
             {activeSketch.caption && <p>{activeSketch.caption}</p>}
             <span>{formatSketchDate(activeSketch.uploadedAt)}</span>
-            <button type="button" className="danger" onClick={() => removeSketch(activeSketch)}><Trash2 size={14} /> Delete sketch</button>
+            <button type="button" className="danger" disabled={deletingSketchId === activeSketch.id} onClick={() => removeSketch(activeSketch)}><Trash2 size={14} /> {deletingSketchId === activeSketch.id ? 'Deleting...' : 'Delete sketch'}</button>
           </div>
           {sketches.length > 1 && (
             <button

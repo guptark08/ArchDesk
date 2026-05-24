@@ -36,8 +36,9 @@ public class ClientController {
             @RequestParam(required = false) ProjectStatus status,
             @RequestParam(required = false) ProjectType projectType,
             @RequestParam(required = false) PaymentStatus paymentStatus,
-            @RequestParam(required = false) String sort) {
-        return service.list(search, status, projectType, paymentStatus, sort);
+            @RequestParam(required = false) String sort,
+            @RequestParam(required = false) Integer limit) {
+        return service.list(search, status, projectType, paymentStatus, sort, limit);
     }
 
     @PostMapping

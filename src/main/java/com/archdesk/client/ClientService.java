@@ -25,8 +25,9 @@ public class ClientService {
     }
 
     @Transactional(readOnly = true)
-    public List<ClientSummary> list(String search, ProjectStatus status, ProjectType projectType, PaymentStatus paymentStatus, String sort) {
+    public List<ClientSummary> list(String search, ProjectStatus status, ProjectType projectType, PaymentStatus paymentStatus, String sort, Integer limit) {
         String normalizedSearch = search == null || search.isBlank() ? null : search.trim();
+        long maxResults = limit == null ? 100 : Math.max(1, Math.min(limit, 100));
         Comparator<Client> comparator = switch (sort == null ? "" : sort) {
             case "created_asc" -> Comparator.comparing(Client::getCreatedAt);
             case "name_asc" -> Comparator.comparing(Client::getFullName, String.CASE_INSENSITIVE_ORDER);
@@ -42,6 +43,7 @@ public class ClientService {
                 .filter(client -> projectType == null || client.getDefaultProjectType() == projectType)
                 .filter(client -> paymentStatus == null || clientPaymentStatus(client) == paymentStatus)
                 .sorted(comparator)
+                .limit(maxResults)
                 .map(ClientDtos::summary)
                 .toList();
     }
