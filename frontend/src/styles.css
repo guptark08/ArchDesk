@@ -60,6 +60,34 @@ h1, h2, h3, p { margin: 0; }
 .mock-form strong { font-size: 13px; color: #1f1f1f; }
 .large-form { width: 100%; min-height: calc(100vh - 120px); grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; background: #ffffff; }
 .large-form strong, .large-form .form-wide, .large-form button { grid-column: 1 / -1; color: #2f2b2b; }
+.form-section-title {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+  padding-top: 14px;
+  border-top: 1px solid #eeeeee;
+  color: #3d3d3d;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.combined-form > strong + .form-section-title,
+.combined-form > strong + .error + .form-section-title {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.combined-form .primary:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+.combined-form input[readonly],
+.combined-form select:disabled {
+  color: #555555;
+  background: #f5f5f5;
+  cursor: default;
+  opacity: 1;
+}
 .rail-project-form { margin: 6px 0; background: #ffffff; }
 .rail-project-form textarea { min-height: 58px; }
 

@@ -33,6 +33,7 @@ const paymentModes: PaymentMode[] = ['CASH', 'BANK_TRANSFER', 'UPI', 'CHEQUE'];
 const paymentStages: PaymentStage[] = ['TOKEN', 'PROGRESS', 'FINAL'];
 
 type ProjectDraft = ReturnType<typeof projectDefaults> & { clientId: number };
+type ProjectDraftInput = ReturnType<typeof projectDefaults>;
 type WorkspaceTab = 'requirements' | 'meeting_notes' | 'site_sketches';
 type PaymentTab = 'payments' | 'history';
 type WorkspaceMode = 'new_client' | 'new_project' | 'project';
@@ -110,6 +111,11 @@ function projectDefaults(client?: ClientDetail) {
     expectedCompletion: '',
     actualCompletion: '',
   };
+}
+
+function generatedProjectName(clientName: string) {
+  const name = clientName.trim();
+  return name ? `${name} Project` : '';
 }
 
 export default function App() {
@@ -353,13 +359,28 @@ function Workspace({ onLogout }: { onLogout: () => void }) {
           showNewProject={showNewProject}
           projectDraft={visibleDraft}
           activeTab={workspaceTab}
-          onClientSaved={async (client) => {
+          onClientProjectSaved={async (client, project) => {
             setShowNewClient(false);
             setDetail(client);
             setSelectedClientId(client.id);
+            setSelectedProjectId(project.id);
+            setProjectDraft(null);
             setWorkspaceTab('requirements');
             setPaymentTab('payments');
             setMobilePanel('main');
+            await refresh(client.id, project.id);
+          }}
+          onClientProjectFailed={async (client, draft, errorMessage) => {
+            setShowNewClient(false);
+            setShowNewProject(true);
+            setDetail(client);
+            setSelectedClientId(client.id);
+            setSelectedProjectId(null);
+            setProjectDraft({ ...draft, clientId: client.id });
+            setWorkspaceTab('requirements');
+            setPaymentTab('payments');
+            setMobilePanel('main');
+            setMessage(errorMessage);
             await refresh(client.id, null);
           }}
           onTabChange={setWorkspaceTab}
@@ -486,7 +507,8 @@ function RequirementPane({
   showNewProject,
   projectDraft,
   activeTab,
-  onClientSaved,
+  onClientProjectSaved,
+  onClientProjectFailed,
   onTabChange,
   onProjectDraftChange,
   onProjectDraftDiscard,
@@ -501,7 +523,8 @@ function RequirementPane({
   showNewProject: boolean;
   projectDraft: ProjectDraft | null;
   activeTab: WorkspaceTab;
-  onClientSaved: (client: ClientDetail) => Promise<void>;
+  onClientProjectSaved: (client: ClientDetail, project: Project) => Promise<void>;
+  onClientProjectFailed: (client: ClientDetail, draft: ProjectDraftInput, errorMessage: string) => Promise<void>;
   onTabChange: (tab: WorkspaceTab) => void;
   onProjectDraftChange: (draft: ProjectDraft) => void;
   onProjectDraftDiscard: () => void;
@@ -512,7 +535,7 @@ function RequirementPane({
 }) {
   return (
     <section className="requirement-pane">
-      {showNewClient && <NewClientForm large onSaved={onClientSaved} />}
+      {showNewClient && <NewClientProjectForm onSaved={onClientProjectSaved} onProjectFailed={onClientProjectFailed} />}
       {!showNewClient && !client && <Dashboard onNavigate={onNavigateToProject} />}
       {client && showNewProject && projectDraft && (
         <NewProjectForm
@@ -753,28 +776,97 @@ function PaymentSidebar({
   );
 }
 
-function NewClientForm({ onSaved, large = false }: { onSaved: (client: ClientDetail) => Promise<void>; large?: boolean }) {
+function NewClientProjectForm({
+  onSaved,
+  onProjectFailed,
+}: {
+  onSaved: (client: ClientDetail, project: Project) => Promise<void>;
+  onProjectFailed: (client: ClientDetail, draft: ProjectDraftInput, errorMessage: string) => Promise<void>;
+}) {
   const [form, setForm] = useState(clientDefaults());
+  const [project, setProject] = useState<ProjectDraftInput>(projectDefaults());
+  const [projectNameAuto, setProjectNameAuto] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  function updateClientName(fullName: string) {
+    setForm((current) => ({ ...current, fullName }));
+    if (projectNameAuto) {
+      setProject((current) => ({ ...current, name: generatedProjectName(fullName) }));
+    }
+  }
+
+  function updateProjectType(projectType: ProjectType) {
+    setForm((current) => ({ ...current, defaultProjectType: projectType }));
+    setProject((current) => ({ ...current, projectType }));
+  }
+
+  function updateProjectStatus(projectStatus: ProjectStatus) {
+    setForm((current) => ({ ...current, projectStatus }));
+    setProject((current) => ({ ...current, status: projectStatus }));
+  }
+
+  function updatePlotSize(plotSize: string) {
+    setForm((current) => ({ ...current, plotSize }));
+    setProject((current) => ({ ...current, plotSize }));
+  }
+
+  function updateProjectName(name: string) {
+    setProjectNameAuto(false);
+    setProject((current) => ({ ...current, name }));
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const saved = await createClient(form);
-    setForm(clientDefaults());
-    await onSaved(saved);
+    setSaving(true);
+    setError('');
+    let savedClient: ClientDetail | null = null;
+    try {
+      savedClient = await createClient(form);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create client');
+      setSaving(false);
+      return;
+    }
+
+    try {
+      const savedProject = await createProject(savedClient.id, projectPayload(project));
+      setForm(clientDefaults());
+      setProject(projectDefaults());
+      setProjectNameAuto(true);
+      await onSaved(savedClient, savedProject);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Client created, but project creation failed';
+      await onProjectFailed(savedClient, project, message);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
-    <form className={large ? 'mock-form large-form' : 'mock-form'} onSubmit={submit}>
-      <strong>Add Client</strong>
-      <label>Name<input required value={form.fullName} onChange={(event) => setForm({ ...form, fullName: event.target.value })} /></label>
-      <label>Phone<input required value={form.phoneNumber} onChange={(event) => setForm({ ...form, phoneNumber: event.target.value })} /></label>
+    <form className="mock-form large-form combined-form" onSubmit={submit}>
+      <strong>New Client</strong>
+      {error && <p className="error form-wide">{error}</p>}
+
+      <div className="form-section-title">Client Details</div>
+      <label>Full name<input required value={form.fullName} onChange={(event) => updateClientName(event.target.value)} /></label>
+      <label>Phone number<input required value={form.phoneNumber} onChange={(event) => setForm({ ...form, phoneNumber: event.target.value })} /></label>
       <label>Email<input value={form.emailAddress} onChange={(event) => setForm({ ...form, emailAddress: event.target.value })} /></label>
       <label>Locality<input value={form.addressLocality} onChange={(event) => setForm({ ...form, addressLocality: event.target.value })} /></label>
-      <label>Type<select value={form.defaultProjectType} onChange={(event) => setForm({ ...form, defaultProjectType: event.target.value as ProjectType })}>{projectTypes.map((type) => <option key={type} value={type}>{label(type)}</option>)}</select></label>
-      <label>Status<select value={form.projectStatus} onChange={(event) => setForm({ ...form, projectStatus: event.target.value as ProjectStatus })}>{projectStatuses.map((status) => <option key={status} value={status}>{label(status)}</option>)}</select></label>
-      <label>Plot size<input value={form.plotSize} onChange={(event) => setForm({ ...form, plotSize: event.target.value })} /></label>
-      <label className="form-wide">Notes<textarea value={form.generalNotes} onChange={(event) => setForm({ ...form, generalNotes: event.target.value })} /></label>
-      <button className="primary">Save client</button>
+      <label>Project type<select value={form.defaultProjectType} onChange={(event) => updateProjectType(event.target.value as ProjectType)}>{projectTypes.map((type) => <option key={type} value={type}>{label(type)}</option>)}</select></label>
+      <label>Project status<select value={form.projectStatus} onChange={(event) => updateProjectStatus(event.target.value as ProjectStatus)}>{projectStatuses.map((status) => <option key={status} value={status}>{label(status)}</option>)}</select></label>
+      <label>Plot size<input value={form.plotSize} onChange={(event) => updatePlotSize(event.target.value)} /></label>
+      <label className="form-wide">General notes<textarea value={form.generalNotes} onChange={(event) => setForm({ ...form, generalNotes: event.target.value })} /></label>
+
+      <div className="form-section-title">First Project</div>
+      <label>Project name<input required value={project.name} onChange={(event) => updateProjectName(event.target.value)} /></label>
+      <label>Project type<select value={project.projectType} disabled>{projectTypes.map((type) => <option key={type} value={type}>{label(type)}</option>)}</select></label>
+      <label>Plot size<input value={project.plotSize} readOnly /></label>
+      <label>Expected completion date<input type="date" value={project.expectedCompletion} onChange={(event) => setProject({ ...project, expectedCompletion: event.target.value })} /></label>
+      <label className="form-wide">Requirements<textarea value={project.requirements} onChange={(event) => setProject({ ...project, requirements: event.target.value })} /></label>
+      <label className="form-wide">Project notes<textarea value={project.notes} onChange={(event) => setProject({ ...project, notes: event.target.value })} /></label>
+
+      <button className="primary" disabled={saving}>{saving ? 'Saving...' : 'Save client & project'}</button>
     </form>
   );
 }
