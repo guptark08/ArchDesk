@@ -22,6 +22,12 @@ import com.archdesk.common.NotFoundException;
 import com.archdesk.project.Project;
 import com.archdesk.project.ProjectRepository;
 
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.S3Exception;
+
 @Service
 public class SketchService {
     private static final Logger log = LoggerFactory.getLogger(SketchService.class);
@@ -30,15 +36,18 @@ public class SketchService {
 
     private final ProjectSketchRepository sketches;
     private final ProjectRepository projects;
-    private final Path uploadRoot;
+    private final S3Client s3Client;
+    private final String bucket;
 
     public SketchService(
             ProjectSketchRepository sketches,
             ProjectRepository projects,
-            @Value("${app.upload.dir:/app/uploads}") String uploadDir) {
+            S3Client s3Client,
+            @Value("${app.r2.bucket}") String bucket) {
         this.sketches = sketches;
         this.projects = projects;
-        this.uploadRoot = Path.of(uploadDir);
+        this.s3Client = s3Client;
+        this.bucket = bucket;
     }
 
     @Transactional(readOnly = true)
@@ -67,13 +76,17 @@ public class SketchService {
         }
 
         String fileName = UUID.randomUUID() + "." + extension;
-        Path directory = uploadRoot.resolve("sketches").resolve(projectId.toString());
-        Path target = directory.resolve(fileName);
+        String key = sketchKey(projectId, fileName);
 
         try {
-            Files.createDirectories(directory);
-            Files.write(target, finalBytes);
-        } catch (IOException ex) {
+            s3Client.putObject(PutObjectRequest.builder()
+                    .bucket(bucket)
+                    .key(key)
+                    .contentType(mimeType)
+                    .contentLength((long) finalBytes.length)
+                    .build(), RequestBody.fromBytes(finalBytes));
+        } catch (S3Exception ex) {
+            log.warn("Unable to upload sketch file to R2: {}", key, ex);
             throw new IllegalArgumentException("Unable to store sketch file");
         }
 
@@ -97,16 +110,20 @@ public class SketchService {
     @Transactional
     public void delete(Long projectId, Long sketchId) {
         ProjectSketch sketch = findOwned(projectId, sketchId);
-        Path target = uploadRoot.resolve("sketches").resolve(projectId.toString()).resolve(sketch.getFileName());
+        String key = sketchKey(projectId, sketch.getFileName());
         try {
-            boolean deleted = Files.deleteIfExists(target);
-            if (!deleted) {
-                log.warn("Sketch file already missing: {}", target);
-            }
-        } catch (IOException ex) {
-            log.warn("Unable to delete sketch file: {}", target, ex);
+            s3Client.deleteObject(DeleteObjectRequest.builder()
+                    .bucket(bucket)
+                    .key(key)
+                    .build());
+        } catch (S3Exception ex) {
+            log.warn("Unable to delete sketch file from R2: {}", key, ex);
         }
         sketches.delete(sketch);
+    }
+
+    private String sketchKey(Long projectId, String fileName) {
+        return "sketches/" + projectId + "/" + fileName;
     }
 
     private Project ensureProjectExists(Long projectId) {

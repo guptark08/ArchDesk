@@ -5,13 +5,17 @@ spring:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/archdesk}
     username: ${SPRING_DATASOURCE_USERNAME:archdesk}
     password: ${SPRING_DATASOURCE_PASSWORD:archdesk}
+    hikari:
+      maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:3}
+      minimum-idle: ${SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE:0}
+      idle-timeout: ${SPRING_DATASOURCE_HIKARI_IDLE_TIMEOUT:30000}
   jpa:
     hibernate:
       ddl-auto: update
     open-in-view: false
     properties:
       hibernate:
-        format_sql: true
+        format_sql: false
   servlet:
     multipart:
       max-file-size: 10MB
@@ -21,8 +25,12 @@ server:
   port: ${PORT:${SERVER_PORT:8080}}
 
 app:
-  upload:
-    dir: ${APP_UPLOAD_DIR:/app/uploads}
+  r2:
+    bucket: ${APP_R2_BUCKET:}
+    endpoint: ${APP_R2_ENDPOINT:}
+    access-key: ${APP_R2_ACCESS_KEY:}
+    secret-key: ${APP_R2_SECRET_KEY:}
+    public-url: ${APP_R2_PUBLIC_URL:}
   jwt:
     secret: ${APP_JWT_SECRET:change-this-development-secret-change-this}
     expiration-minutes: ${APP_JWT_EXPIRATION_MINUTES:720}

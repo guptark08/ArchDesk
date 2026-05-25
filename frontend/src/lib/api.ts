@@ -3,6 +3,7 @@ import type { ClientDetail, ClientSummary, DashboardStats, Ledger, PaymentMode, 
 const configuredApiBase = import.meta.env.VITE_API_BASE_URL?.trim();
 const useSameOriginApi = import.meta.env.VITE_USE_SAME_ORIGIN_API === 'true';
 const API_BASE = useSameOriginApi ? '' : configuredApiBase || (import.meta.env.DEV ? 'http://localhost:8080' : '');
+const R2_PUBLIC_URL = import.meta.env.VITE_R2_PUBLIC_URL?.trim();
 
 function apiUrl(path: string): string {
   if (!API_BASE && !useSameOriginApi) {
@@ -188,7 +189,10 @@ export function deleteSketch(projectId: number, sketchId: number): Promise<void>
 }
 
 export function sketchUrl(projectId: number, fileName: string): string {
-  return apiUrl(`/uploads/sketches/${projectId}/${fileName}`);
+  if (!R2_PUBLIC_URL) {
+    throw new Error('R2 public URL is not configured. Set VITE_R2_PUBLIC_URL to your Cloudflare R2 public bucket URL.');
+  }
+  return `${R2_PUBLIC_URL.replace(/\/$/, '')}/sketches/${projectId}/${fileName}`;
 }
 
 async function handleResponse<T>(response: Response): Promise<T> {
